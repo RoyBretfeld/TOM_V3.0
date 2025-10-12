@@ -1,0 +1,15 @@
+# GitHub-Setup Befehle für TOM v3.0
+
+# 1. Remote-Repository hinzufügen (ersetze USERNAME und REPO_NAME)
+git remote add origin https://github.com/USERNAME/REPO_NAME.git
+
+# 2. Aktuellen Code committen (falls noch nicht geschehen)
+git add .
+git commit -m "Cleanup: Entferne system/ Verzeichnis nach Umstrukturierung"
+
+# 3. Code zu GitHub pushen
+git push -u origin master
+
+# 4. Verifikation
+git remote -v
+git status
