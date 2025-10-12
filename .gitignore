@@ -1,0 +1,29 @@
+# TOM v3.0 - Git Ignore
+# CSB v1 Compliance: UTF-8 Encoding
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.env
+
+# Models
+models/*/
+!models/*/.gitkeep
+
+# Logs
+logs/*
+*.log
+
+# Runtime Data
+data/runtime/*
+!data/runtime/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
