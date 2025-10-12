@@ -1,0 +1,27 @@
+name: security-baseline
+on: [push, pull_request]
+jobs:
+  sec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install Python tooling
+        run: pip install -q pre-commit bandit pip-audit || true
+      - name: pre-commit (quick)
+        run: pre-commit run --all-files || true
+      - name: bandit (py security)
+        run: bandit -q -r . || true
+      - name: pip-audit (deps CVE)
+        run: pip-audit -f json || true
+      - name: Node available?
+        id: node
+        run: echo "has_node=$([ -f package.json ] && echo true || echo false)" >> $GITHUB_OUTPUT
+      - if: steps.node.outputs.has_node == 'true'
+        name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - if: steps.node.outputs.has_node == 'true'
+        name: npm audit (prod)
+        run: npm audit --omit=dev || true

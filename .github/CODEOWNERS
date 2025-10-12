@@ -1,0 +1,6 @@
+# Reviewer-Pflicht für sensible Pfade
+/data/originals/**    @maintainers
+ingest/reader.py      @maintainers
+tools/orig_integrity.py @maintainers
+repositories/**       @maintainers
+routes/**             @maintainers

@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: |
+          (?x)^(
+            node_modules/|
+            dist/|
+            build/
+          )
+  - repo: local
+    hooks:
+      - id: block-orig-writes
+        name: Block writes in ./data/originals
+        entry: python scripts/hooks/block_orig_writes.py
+        language: system
+        stages: [commit]
+      - id: scan-forbidden-write-patterns
+        name: Scan for forbidden write patterns to ./data/originals
+        entry: python scripts/hooks/scan_forbidden_patterns.py
+        language: system
+        stages: [commit]
+      - id: deny-large-diff
+        name: Deny large diff
+        entry: python scripts/hooks/deny_large_diff.py
+        language: system
+        stages: [commit]

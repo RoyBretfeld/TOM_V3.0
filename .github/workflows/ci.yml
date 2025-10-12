@@ -1,0 +1,39 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CSB_MAX_FILES: 30
+      CSB_MAX_LINES: 600
+      SLO_OK_RATE: 0.95
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Setup Node (optional)
+        uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install Python deps (if exists)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+      - name: Install JS deps (if exists)
+        run: |
+          if [ -f package.json ]; then npm ci; fi
+      - name: Pre-commit (blocking)
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
+      - name: PatchGuard (optional)
+        run: |
+          if [ -f tools/patch_guard.py ]; then python tools/patch_guard.py; fi
+      - name: SLO-Check (optional)
+        run: |
+          if [ -f tools/ci_slo_check.py ]; then python tools/ci_slo_check.py; fi
+      - name: Python Tests (if tests present)
+        run: |
+          if compgen -G "tests/**/*.py" > /dev/null; then pytest -q; else echo "No Python tests"; fi
+      - name: ESLint (if configured)
+        run: |
+          if [ -f package.json ] && npx --yes eslint -v >/dev/null 2>&1; then npx --yes eslint .; else echo "No ESLint"; fi
