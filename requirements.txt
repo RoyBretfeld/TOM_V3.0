@@ -1,2 +1,77 @@
+# TOM v3.0 - Complete Dependencies
+# CSB v1 Compliance: UTF-8 Encoding
+# Automatisch generiert für alle Module
+
+# Core Dependencies
 pytest>=7.0.0
 pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
+
+# WebSocket & Networking
+websockets>=11.0.0
+aiohttp>=3.8.0
+uvloop>=0.17.0
+
+# Redis & Message Queue
+redis[hiredis]>=4.5.0
+redis-py-cluster>=2.1.0
+
+# AI & ML
+openai>=1.0.0
+torch>=2.0.0
+transformers>=4.21.0
+whisper>=1.0.0  # Für lokale STT
+
+# Audio Processing
+pyaudio>=0.2.13
+soundfile>=0.12.0
+numpy>=1.24.0
+librosa>=0.10.0
+
+# Text-to-Speech
+piper-tts>=0.1.0  # Lokale TTS
+pyttsx3>=2.90
+
+# Security & Auth
+PyJWT>=2.8.0
+cryptography>=41.0.0
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+
+# Validation & Serialization
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Monitoring & Metrics
+prometheus-client>=0.16.0
+structlog>=23.0.0
+
+# Configuration
+python-dotenv>=1.0.0
+dynaconf>=3.2.0
+
+# Development & Linting
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.5.0
+pre-commit>=3.0.0
+
+# Testing & Quality
+bandit>=1.7.0
+safety>=2.3.0
+pytest-benchmark>=4.0.0
+
+# Utilities
+aiofiles>=23.0.0
+python-multipart>=0.0.6
+python-jose[cryptography]>=3.3.0
+async-timeout>=4.0.0  # Für Redis async
+redis[hiredis]>=4.5.0  # Redis mit verbesserter Performance
+
+# Optional: For enhanced performance
+orjson>=3.9.0  # Schneller JSON
+httpx>=0.24.0  # Async HTTP Client
+
+# Production ready
+gunicorn>=21.0.0
+uvicorn[standard]>=0.23.0

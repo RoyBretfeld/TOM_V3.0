@@ -1,0 +1,39 @@
+# TOM v3.0 - Dispatcher Dockerfile
+# Security-hardened Container für FSM-basierte Anrufsteuerung
+
+FROM python:3.11-slim
+
+# Security: Create non-root user
+RUN groupadd -r dispatcher && useradd -r -g dispatcher dispatcher
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt /app/
+
+# Security: Create virtual environment as non-root
+RUN python -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY apps /app/apps
+
+# Security: Set proper ownership
+RUN chown -R dispatcher:dispatcher /app
+
+# Security: Switch to non-root user
+USER dispatcher
+
+# Security: Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import apps.dispatcher.rt_fsm; print('Dispatcher OK')" || exit 1
+
+# Start the dispatcher
+CMD ["/app/venv/bin/python", "-m", "apps.dispatcher.rt_fsm"]

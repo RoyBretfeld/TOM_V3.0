@@ -1,0 +1,44 @@
+# TOM v3.0 - Monitor Dockerfile
+# Security-hardened Container für Metriken und Health-Checks
+
+FROM python:3.11-slim
+
+# Security: Create non-root user
+RUN groupadd -r monitor && useradd -r -g monitor monitor
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt /app/
+
+# Security: Create virtual environment as non-root
+RUN python -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY apps /app/apps
+
+# Security: Set proper ownership
+RUN chown -R monitor:monitor /app
+
+# Security: Switch to non-root user
+USER monitor
+
+# Security: Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:9090/healthz || exit 1
+
+# Start the monitor
+CMD ["/app/venv/bin/python", "-m", "apps.monitor.metrics"]

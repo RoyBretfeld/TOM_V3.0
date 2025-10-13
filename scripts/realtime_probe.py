@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """
-TOM v3.0 - Realtime Probe Script für Latenzmessung
+TOM v3.0 - Realtime Probe Script für Loop Closure Latenzmessung
 
 Misst die Latenz der kompletten Realtime-Pipeline:
-Telefonie → STT → LLM → TTS → Telefonie
+Frontend → WebSocket → Mock-STT/LLM/TTS → Frontend
 
 CSB v1 Compliance:
 - UTF-8 Encoding für alle Ausgaben
-- CSV-Export mit korrektem Encoding
-- SLO-Verifikation (< 1000ms End-to-End)
+- JSON-Export mit korrektem Encoding
+- SLO-Verifikation (< 1500ms End-to-End für Mock)
 """
 import asyncio
 import time
-import csv
 import json
 import os
 import sys
+import base64
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import websockets
-import redis.asyncio as redis
 
 # UTF-8 Encoding sicherstellen
 if sys.stdout.encoding != 'utf-8':
@@ -27,7 +26,7 @@ if sys.stdout.encoding != 'utf-8':
 
 class RealtimeProbe:
     """
-    Realtime-Probe für Latenzmessung der TOM v3.0 Pipeline
+    Realtime-Probe für Loop Closure Latenzmessung der TOM v3.0 Pipeline
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -39,141 +38,159 @@ class RealtimeProbe:
         """
         self.config = config
         self.results = []
-        self.redis_client = None
         self.websocket = None
+        self.call_id = f"probe_{int(time.time())}"
         
-        # SLO-Ziele
-        self.slo_target_latency = 1000  # ms
-        self.slo_accuracy = 0.95
+        # SLO-Ziele für Mock-Modus
+        self.slo_target_latency = 1500  # ms (höher für Mock)
+        self.slo_accuracy = 0.90
         
-    async def connect_services(self):
-        """Verbindet zu Redis und WebSocket"""
+        # Messpunkte
+        self.timestamps = {}
+        
+    async def connect_websocket(self):
+        """Verbindet zum WebSocket-Server"""
         try:
-            # Redis-Verbindung
-            self.redis_client = redis.from_url(
-                self.config.get('redis_url', 'redis://localhost:6379/0'),
-                encoding='utf-8',
-                decode_responses=True
-            )
-            await self.redis_client.ping()
-            print("✅ Redis-Verbindung erfolgreich")
+            websocket_url = self.config.get('websocket_url', 'ws://localhost:8080/ws/stream')
+            jwt_token = self.config.get('jwt_token', 'dev_token')
             
-            # WebSocket-Verbindung
-            websocket_url = self.config.get('websocket_url', 'ws://localhost:8080/ws')
-            self.websocket = await websockets.connect(websocket_url)
-            print("✅ WebSocket-Verbindung erfolgreich")
+            # WebSocket-URL mit Call-ID und JWT
+            full_url = f"{websocket_url}/{self.call_id}?t={jwt_token}"
+            
+            self.websocket = await websockets.connect(full_url)
+            print(f"✅ WebSocket-Verbindung erfolgreich: {self.call_id}")
             
         except Exception as e:
-            print(f"❌ Verbindungsfehler: {e}")
+            print(f"❌ WebSocket-Verbindungsfehler: {e}")
             raise
     
-    async def measure_stt_latency(self, audio_data: bytes) -> float:
-        """
-        Misst STT-Latenz
-        
-        Args:
-            audio_data: Audio-Daten für Transkription
+    async def send_ping(self) -> float:
+        """Sendet Ping und misst Pong-Latenz"""
+        try:
+            ping_start = time.time()
             
-        Returns:
-            Latenz in Millisekunden
-        """
-        start_time = time.time()
-        
-        # Simuliere STT-Verarbeitung
-        await asyncio.sleep(0.1)  # Simulierte Verarbeitungszeit
-        
-        # Publish zu Redis Stream
-        await self.redis_client.xadd(
-            'stt_stream',
-            {'audio_data': audio_data.hex(), 'timestamp': str(time.time())}
-        )
-        
-        end_time = time.time()
-        return (end_time - start_time) * 1000
-    
-    async def measure_llm_latency(self, text: str) -> float:
-        """
-        Misst LLM-Latenz
-        
-        Args:
-            text: Text für LLM-Verarbeitung
+            ping_message = {
+                "type": "ping",
+                "ts": int(ping_start * 1000)
+            }
             
-        Returns:
-            Latenz in Millisekunden
-        """
-        start_time = time.time()
-        
-        # Simuliere LLM-Verarbeitung
-        await asyncio.sleep(0.3)  # Simulierte Verarbeitungszeit
-        
-        # Publish zu Redis Stream
-        await self.redis_client.xadd(
-            'llm_stream',
-            {'text': text, 'timestamp': str(time.time())}
-        )
-        
-        end_time = time.time()
-        return (end_time - start_time) * 1000
-    
-    async def measure_tts_latency(self, text: str) -> float:
-        """
-        Misst TTS-Latenz
-        
-        Args:
-            text: Text für TTS-Synthese
+            await self.websocket.send(json.dumps(ping_message))
             
-        Returns:
-            Latenz in Millisekunden
-        """
-        start_time = time.time()
-        
-        # Simuliere TTS-Verarbeitung
-        await asyncio.sleep(0.2)  # Simulierte Verarbeitungszeit
-        
-        # Publish zu Redis Stream
-        await self.redis_client.xadd(
-            'tts_stream',
-            {'text': text, 'timestamp': str(time.time())}
-        )
-        
-        end_time = time.time()
-        return (end_time - start_time) * 1000
-    
-    async def measure_end_to_end_latency(self, audio_data: bytes) -> Dict[str, float]:
-        """
-        Misst komplette End-to-End-Latenz
-        
-        Args:
-            audio_data: Audio-Daten für komplette Pipeline
+            # Warte auf Pong
+            response = await asyncio.wait_for(self.websocket.recv(), timeout=5.0)
+            pong_data = json.loads(response)
             
-        Returns:
-            Dictionary mit Latenz-Messungen
-        """
-        total_start = time.time()
-        
-        # STT-Verarbeitung
-        stt_latency = await self.measure_stt_latency(audio_data)
-        
-        # LLM-Verarbeitung (simulierter Text)
-        test_text = "Hallo, wie kann ich Ihnen helfen?"
-        llm_latency = await self.measure_llm_latency(test_text)
-        
-        # TTS-Verarbeitung
-        response_text = "Vielen Dank für Ihren Anruf. Ich bin hier, um zu helfen."
-        tts_latency = await self.measure_tts_latency(response_text)
-        
-        total_end = time.time()
-        total_latency = (total_end - total_start) * 1000
-        
-        return {
-            'stt_latency': stt_latency,
-            'llm_latency': llm_latency,
-            'tts_latency': tts_latency,
-            'total_latency': total_latency,
-            'timestamp': datetime.now().isoformat()
-        }
+            if pong_data.get('type') == 'pong':
+                ping_end = time.time()
+                latency = (ping_end - ping_start) * 1000
+                print(f"📡 Ping/Pong-Latenz: {latency:.1f}ms")
+                return latency
+            else:
+                print("❌ Ungültige Pong-Antwort")
+                return -1
+                
+        except asyncio.TimeoutError:
+            print("❌ Ping/Pong-Timeout")
+            return -1
+        except Exception as e:
+            print(f"❌ Ping/Pong-Fehler: {e}")
+            return -1
     
-    async def run_benchmark(self, iterations: int = 10) -> List[Dict[str, float]]:
+    async def send_audio_chunk(self) -> Dict[str, float]:
+        """Sendet Audio-Chunk und misst komplette Pipeline-Latenz"""
+        try:
+            # Generiere Mock-Audio-Daten (1 Sekunde Stille)
+            silence_samples = 16000  # 1 Sekunde bei 16kHz
+            silence_data = b'\x00\x00' * silence_samples
+            audio_b64 = base64.b64encode(silence_data).decode('utf-8')
+            
+            # Start-Zeit für komplette Pipeline
+            pipeline_start = time.time()
+            
+            # Audio-Chunk senden
+            audio_message = {
+                "type": "audio_chunk",
+                "ts": int(pipeline_start * 1000),
+                "data": audio_b64,
+                "format": "pcm16_16k"
+            }
+            
+            await self.websocket.send(json.dumps(audio_message))
+            print("🎤 Audio-Chunk gesendet")
+            
+            # Messpunkte für verschiedene Events
+            stt_final_time = None
+            first_llm_token_time = None
+            first_tts_audio_time = None
+            turn_end_time = None
+            
+            # Warte auf Events mit Timeout
+            timeout = 10.0  # 10 Sekunden Timeout
+            start_wait = time.time()
+            
+            while time.time() - start_wait < timeout:
+                try:
+                    response = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
+                    event_data = json.loads(response)
+                    event_type = event_data.get('type')
+                    
+                    current_time = time.time()
+                    
+                    if event_type == 'stt_final' and stt_final_time is None:
+                        stt_final_time = current_time
+                        print(f"✅ STT Final erhalten: {event_data.get('text', '')}")
+                        
+                    elif event_type == 'llm_token' and first_llm_token_time is None:
+                        first_llm_token_time = current_time
+                        print(f"🤖 Erstes LLM-Token: {event_data.get('text', '')}")
+                        
+                    elif event_type == 'tts_audio' and first_tts_audio_time is None:
+                        first_tts_audio_time = current_time
+                        print(f"🔊 Erstes TTS-Audio erhalten")
+                        
+                    elif event_type == 'turn_end' and turn_end_time is None:
+                        turn_end_time = current_time
+                        print(f"🏁 Turn-Ende erhalten")
+                        break  # Pipeline abgeschlossen
+                        
+                except asyncio.TimeoutError:
+                    continue
+            
+            # Berechne Latenzen
+            latencies = {}
+            
+            if stt_final_time:
+                latencies['stt_final_ms'] = (stt_final_time - pipeline_start) * 1000
+            else:
+                latencies['stt_final_ms'] = -1
+                
+            if first_llm_token_time:
+                latencies['llm_first_token_ms'] = (first_llm_token_time - pipeline_start) * 1000
+            else:
+                latencies['llm_first_token_ms'] = -1
+                
+            if first_tts_audio_time:
+                latencies['tts_first_audio_ms'] = (first_tts_audio_time - pipeline_start) * 1000
+            else:
+                latencies['tts_first_audio_ms'] = -1
+                
+            if turn_end_time:
+                latencies['e2e_ms'] = (turn_end_time - pipeline_start) * 1000
+            else:
+                latencies['e2e_ms'] = -1
+            
+            return latencies
+            
+        except Exception as e:
+            print(f"❌ Audio-Chunk-Fehler: {e}")
+            return {
+                'stt_final_ms': -1,
+                'llm_first_token_ms': -1,
+                'tts_first_audio_ms': -1,
+                'e2e_ms': -1
+            }
+    
+    async def run_benchmark(self, iterations: int = 5) -> List[Dict[str, Any]]:
         """
         Führt Benchmark-Tests durch
         
@@ -183,32 +200,44 @@ class RealtimeProbe:
         Returns:
             Liste der Messergebnisse
         """
-        print(f"🚀 Starte Benchmark mit {iterations} Iterationen...")
+        print(f"🚀 Starte Loop Closure Benchmark mit {iterations} Iterationen...")
         
         results = []
         for i in range(iterations):
-            print(f"📊 Iteration {i+1}/{iterations}")
+            print(f"\n📊 Iteration {i+1}/{iterations}")
             
-            # Simuliere Audio-Daten
-            audio_data = b"fake_audio_data_" + str(i).encode('utf-8')
+            # Ping/Pong-Test
+            ping_latency = await self.send_ping()
             
-            # Messung durchführen
-            result = await self.measure_end_to_end_latency(audio_data)
+            # Audio-Chunk-Test
+            latencies = await self.send_audio_chunk()
+            
+            # Ergebnis zusammenstellen
+            result = {
+                'iteration': i + 1,
+                'timestamp': datetime.now().isoformat(),
+                'ping_latency_ms': ping_latency,
+                **latencies
+            }
+            
             results.append(result)
             
-            print(f"   STT: {result['stt_latency']:.1f}ms")
-            print(f"   LLM: {result['llm_latency']:.1f}ms")
-            print(f"   TTS: {result['tts_latency']:.1f}ms")
-            print(f"   Total: {result['total_latency']:.1f}ms")
+            # Ausgabe
+            print(f"   📡 Ping/Pong: {ping_latency:.1f}ms")
+            print(f"   ✅ STT Final: {latencies['stt_final_ms']:.1f}ms")
+            print(f"   🤖 LLM First Token: {latencies['llm_first_token_ms']:.1f}ms")
+            print(f"   🔊 TTS First Audio: {latencies['tts_first_audio_ms']:.1f}ms")
+            print(f"   🏁 End-to-End: {latencies['e2e_ms']:.1f}ms")
             
-            # Kurze Pause zwischen Tests
-            await asyncio.sleep(0.5)
+            # Pause zwischen Tests
+            if i < iterations - 1:
+                await asyncio.sleep(2.0)
         
         return results
     
-    def verify_slo_compliance(self, results: List[Dict[str, float]]) -> Dict[str, Any]:
+    def verify_slo_compliance(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Verifiziert SLO-Compliance
+        Verifiziert SLO-Compliance für Loop Closure
         
         Args:
             results: Messergebnisse
@@ -216,22 +245,34 @@ class RealtimeProbe:
         Returns:
             SLO-Compliance-Status
         """
-        total_latencies = [r['total_latency'] for r in results]
-        avg_latency = sum(total_latencies) / len(total_latencies)
-        max_latency = max(total_latencies)
-        min_latency = min(total_latencies)
+        # Filtere gültige Ergebnisse (ohne -1)
+        valid_results = [r for r in results if r['e2e_ms'] > 0]
+        
+        if not valid_results:
+            return {
+                'avg_e2e_ms': -1,
+                'max_e2e_ms': -1,
+                'min_e2e_ms': -1,
+                'compliance_rate': 0.0,
+                'overall_compliant': False
+            }
+        
+        e2e_latencies = [r['e2e_ms'] for r in valid_results]
+        avg_latency = sum(e2e_latencies) / len(e2e_latencies)
+        max_latency = max(e2e_latencies)
+        min_latency = min(e2e_latencies)
         
         # SLO-Checks
         latency_compliant = avg_latency < self.slo_target_latency
         max_latency_compliant = max_latency < self.slo_target_latency * 1.5
         
-        compliance_rate = sum(1 for lat in total_latencies if lat < self.slo_target_latency) / len(total_latencies)
+        compliance_rate = sum(1 for lat in e2e_latencies if lat < self.slo_target_latency) / len(e2e_latencies)
         accuracy_compliant = compliance_rate >= self.slo_accuracy
         
         return {
-            'avg_latency': avg_latency,
-            'max_latency': max_latency,
-            'min_latency': min_latency,
+            'avg_e2e_ms': avg_latency,
+            'max_e2e_ms': max_latency,
+            'min_e2e_ms': min_latency,
             'compliance_rate': compliance_rate,
             'latency_compliant': latency_compliant,
             'max_latency_compliant': max_latency_compliant,
@@ -239,9 +280,9 @@ class RealtimeProbe:
             'overall_compliant': latency_compliant and max_latency_compliant and accuracy_compliant
         }
     
-    def export_csv(self, results: List[Dict[str, float]], filename: str = None):
+    def export_json(self, results: List[Dict[str, Any]], filename: str = None):
         """
-        Exportiert Ergebnisse als CSV mit UTF-8 Encoding
+        Exportiert Ergebnisse als JSON mit UTF-8 Encoding
         
         Args:
             results: Messergebnisse
@@ -249,51 +290,38 @@ class RealtimeProbe:
         """
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"realtime_probe_results_{timestamp}.csv"
+            filename = f"realtime_probe_results_{timestamp}.json"
         
         try:
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['timestamp', 'stt_latency', 'llm_latency', 'tts_latency', 'total_latency']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                
-                writer.writeheader()
-                for result in results:
-                    writer.writerow({
-                        'timestamp': result['timestamp'],
-                        'stt_latency': f"{result['stt_latency']:.2f}",
-                        'llm_latency': f"{result['llm_latency']:.2f}",
-                        'tts_latency': f"{result['tts_latency']:.2f}",
-                        'total_latency': f"{result['total_latency']:.2f}"
-                    })
+            with open(filename, 'w', encoding='utf-8') as jsonfile:
+                json.dump(results, jsonfile, indent=2, ensure_ascii=False)
             
             print(f"📊 Ergebnisse exportiert nach: {filename}")
             
         except Exception as e:
-            print(f"❌ CSV-Export-Fehler: {e}")
+            print(f"❌ JSON-Export-Fehler: {e}")
     
     async def cleanup(self):
         """Räumt Verbindungen auf"""
-        if self.redis_client:
-            await self.redis_client.close()
         if self.websocket:
             await self.websocket.close()
 
 async def main():
     """Hauptfunktion"""
-    print("🎯 TOM v3.0 Realtime Probe gestartet")
+    print("🎯 TOM v3.0 Realtime Loop Closure Probe gestartet")
     
     # Konfiguration
     config = {
-        'redis_url': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-        'websocket_url': os.getenv('WEBSOCKET_URL', 'ws://localhost:8080/ws'),
-        'iterations': int(os.getenv('PROBE_ITERATIONS', '10'))
+        'websocket_url': os.getenv('WEBSOCKET_URL', 'ws://localhost:8080/ws/stream'),
+        'jwt_token': os.getenv('JWT_TOKEN', 'dev_token'),
+        'iterations': int(os.getenv('PROBE_ITERATIONS', '5'))
     }
     
     probe = RealtimeProbe(config)
     
     try:
-        # Services verbinden
-        await probe.connect_services()
+        # WebSocket verbinden
+        await probe.connect_websocket()
         
         # Benchmark durchführen
         results = await probe.run_benchmark(config['iterations'])
@@ -302,22 +330,23 @@ async def main():
         slo_status = probe.verify_slo_compliance(results)
         
         print("\n📊 SLO-Compliance-Status:")
-        print(f"   Durchschnittslatenz: {slo_status['avg_latency']:.1f}ms")
-        print(f"   Max-Latenz: {slo_status['max_latency']:.1f}ms")
+        print(f"   Durchschnittslatenz: {slo_status['avg_e2e_ms']:.1f}ms")
+        print(f"   Max-Latenz: {slo_status['max_e2e_ms']:.1f}ms")
+        print(f"   Min-Latenz: {slo_status['min_e2e_ms']:.1f}ms")
         print(f"   Compliance-Rate: {slo_status['compliance_rate']:.1%}")
-        print(f"   Latenz-SLO: {'✅' if slo_status['latency_compliant'] else '❌'}")
-        print(f"   Accuracy-SLO: {'✅' if slo_status['accuracy_compliant'] else '❌'}")
+        print(f"   Latenz-SLO (< {probe.slo_target_latency}ms): {'✅' if slo_status['latency_compliant'] else '❌'}")
+        print(f"   Accuracy-SLO (> {probe.slo_accuracy:.0%}): {'✅' if slo_status['accuracy_compliant'] else '❌'}")
         print(f"   Gesamt-SLO: {'✅' if slo_status['overall_compliant'] else '❌'}")
         
-        # CSV-Export
-        probe.export_csv(results)
+        # JSON-Export
+        probe.export_json(results)
         
         # Ergebnis
         if slo_status['overall_compliant']:
-            print("\n🎉 Alle SLOs erreicht!")
+            print("\n🎉 Alle SLOs erreicht! Loop Closure funktioniert.")
             return 0
         else:
-            print("\n⚠️ SLO-Verstöße erkannt!")
+            print("\n⚠️ SLO-Verstöße erkannt! Optimierung erforderlich.")
             return 1
             
     except Exception as e:

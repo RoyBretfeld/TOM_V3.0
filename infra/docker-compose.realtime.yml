@@ -1,118 +1,74 @@
 version: '3.8'
 
+x-healthcheck: &healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+x-security: &security
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
 services:
   # Redis für Message Queue und Stream-Koordination
   redis:
     image: redis:7-alpine
+    <<: [*restart-policy, *security]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 5
+    tmpfs:
+      - /tmp:size=100m
 
   # Telephony Bridge - WebSocket-Server
   telephony-bridge:
     build:
       context: ..
       dockerfile: infra/Dockerfile.telephony-bridge
+    <<: [*restart-policy, *security]
     ports:
       - "8080:8080"
     environment:
       - REDIS_URL=redis://redis:6379/0
       - WEBSOCKET_PORT=8080
+      - JWT_SECRET=${JWT_SECRET:-change_me_in_production}
       - LOG_LEVEL=INFO
+      - MAX_RATE_LIMIT=120
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ../apps:/app/apps
+      - ../apps:/app/apps:ro
       - ../data/runtime:/app/data/runtime
-    restart: unless-stopped
+    tmpfs:
+      - /tmp:size=50m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      <<: *healthcheck
 
-  # STT Stream Worker
-  stt-worker:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.stt-worker
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - STT_MODEL_PATH=/app/models/stt
-      - AUDIO_SAMPLE_RATE=16000
-      - AUDIO_CHUNK_SIZE=1024
-      - LOG_LEVEL=INFO
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../apps:/app/apps
-      - ../data/runtime:/app/data/runtime
-      - stt_models:/app/models/stt
-    restart: unless-stopped
-
-  # LLM Stream Worker
-  llm-worker:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.llm-worker
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_MODEL=gpt-3.5-turbo
-      - LOG_LEVEL=INFO
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../apps:/app/apps
-      - ../data/runtime:/app/data/runtime
-    restart: unless-stopped
-
-  # TTS Stream Worker
-  tts-worker:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.tts-worker
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - TTS_MODEL_PATH=/app/models/tts
-      - AUDIO_SAMPLE_RATE=16000
-      - LOG_LEVEL=INFO
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../apps:/app/apps
-      - ../data/runtime:/app/data/runtime
-      - tts_models:/app/models/tts
-    restart: unless-stopped
-
-  # Dispatcher FSM
-  dispatcher:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.dispatcher
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - MAX_CONCURRENT_CALLS=10
-      - LOG_LEVEL=INFO
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../apps:/app/apps
-      - ../data/runtime:/app/data/runtime
-    restart: unless-stopped
+  # NOTE: Separate Worker nicht mehr nötig bei Speech-to-Speech API
+  # Die Speech-to-Speech Verarbeitung läuft direkt in der Telephony Bridge
 
   # Monitor & Metrics
   monitor:
     build:
       context: ..
       dockerfile: infra/Dockerfile.monitor
+    <<: [*restart-policy, *security]
     ports:
       - "9090:9090"
     environment:
@@ -123,28 +79,40 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ../apps:/app/apps
+      - ../apps:/app/apps:ro
       - ../data/runtime:/app/data/runtime
-    restart: unless-stopped
+    tmpfs:
+      - /tmp:size=20m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/healthz"]
+      <<: *healthcheck
 
-  # Nginx Load Balancer
+  # Nginx Load Balancer mit Security-Hardening
   nginx:
-    image: nginx:alpine
+    image: nginx:1.25-alpine
+    <<: [*restart-policy, *security]
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ../web/dashboard/dist:/usr/share/nginx/html:ro
+    environment:
+      - NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx
+      - NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
+    tmpfs:
+      - /var/cache/nginx:rw,nosuid,nodev,noexec,relatime,size=10m
+      - /var/run:rw,nosuid,nodev,noexec,relatime,size=5m
+      - /tmp:rw,nosuid,nodev,noexec,relatime,size=5m
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      <<: *healthcheck
     depends_on:
       - telephony-bridge
       - monitor
-    restart: unless-stopped
 
 volumes:
   redis_data:
-  stt_models:
-  tts_models:
 
 networks:
   default:

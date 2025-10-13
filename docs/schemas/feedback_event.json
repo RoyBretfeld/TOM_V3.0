@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Feedback Event Schema",
+  "description": "Schema für RL-Feedback-Events in TOM v3.0",
+  "type": "object",
+  "required": ["call_id", "ts", "agent", "profile", "policy_variant", "signals"],
+  "properties": {
+    "call_id": {
+      "type": "string",
+      "description": "Eindeutige Call-ID",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "ts": {
+      "type": "number",
+      "description": "Unix-Timestamp mit Millisekunden",
+      "minimum": 0
+    },
+    "agent": {
+      "type": "string",
+      "description": "Agent-Name (z.B. 'TOM')",
+      "enum": ["TOM", "TOM_v1", "TOM_v2"]
+    },
+    "profile": {
+      "type": "string",
+      "description": "Kundenprofil/Use-Case",
+      "enum": ["kfz", "it", "sales", "support", "general"]
+    },
+    "policy_variant": {
+      "type": "string",
+      "description": "Policy-Variante die verwendet wurde",
+      "pattern": "^v[0-9]+[a-z]$",
+      "examples": ["v1a", "v1b", "v2a"]
+    },
+    "signals": {
+      "type": "object",
+      "description": "Feedback-Signale",
+      "required": ["resolution"],
+      "properties": {
+        "user_rating": {
+          "type": "integer",
+          "description": "Benutzerbewertung 1-5",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "barge_in_count": {
+          "type": "integer",
+          "description": "Anzahl Barge-Ins",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "handover": {
+          "type": "boolean",
+          "description": "Übergabe an menschlichen Agent"
+        },
+        "resolution": {
+          "type": "boolean",
+          "description": "Ziel erreicht/Problem gelöst"
+        },
+        "duration_sec": {
+          "type": "number",
+          "description": "Gesprächsdauer in Sekunden",
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "repeats": {
+          "type": "integer",
+          "description": "Anzahl Wiederholungen",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "escalation": {
+          "type": "boolean",
+          "description": "Eskalation erforderlich"
+        },
+        "satisfaction": {
+          "type": "number",
+          "description": "Zufriedenheitswert -1 bis +1",
+          "minimum": -1,
+          "maximum": 1
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

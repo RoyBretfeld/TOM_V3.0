@@ -1,0 +1,48 @@
+# TOM v3.0 - STT Worker Dockerfile
+# Security-hardened Container für Speech-to-Text
+
+FROM python:3.11-slim
+
+# Security: Create non-root user
+RUN groupadd -r stt && useradd -r -g stt stt
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies for audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt /app/
+
+# Security: Create virtual environment as non-root
+RUN python -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY apps /app/apps
+COPY models /app/models
+
+# Security: Set proper ownership
+RUN chown -R stt:stt /app
+
+# Security: Switch to non-root user
+USER stt
+
+# Security: Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Create model directory
+RUN mkdir -p /app/models/stt
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import apps.realtime.stt_stream; print('STT OK')" || exit 1
+
+# Start the STT worker
+CMD ["/app/venv/bin/python", "-m", "apps.realtime.stt_stream"]
