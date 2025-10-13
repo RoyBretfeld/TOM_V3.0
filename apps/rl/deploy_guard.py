@@ -3,292 +3,325 @@ TOM v3.0 - RL Deploy Guard
 Shadow/A-B Deployment Guard für sichere Policy-Varianten-Deployment
 """
 
+from dataclasses import dataclass, field
+from typing import Protocol
+import json, os
+import random as _random
 import logging
-import json
-import os
-from typing import Dict, Any, Optional, List, Set
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from typing import Dict, Any, Set, List, Optional
+from pydantic import BaseModel, Field
 
-from apps.rl.policy_bandit import PolicyBandit, get_policy_stats
-from apps.rl.reward_calc import calc_reward
+from apps.rl.policy_bandit import PolicyBandit, get_policy_stats, PolicyVariant
 from apps.monitor.metrics import (
-    record_policy_pull, update_active_variants, 
-    update_blacklisted_variants, record_escalation
+    update_active_variants, update_blacklisted_variants, record_policy_pull, record_escalation
 )
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class DeployConfig:
-    """Konfiguration für Deployment-Guard"""
-    traffic_split_new: float = 0.1  # 10% für neue Varianten
-    traffic_split_uncertain: float = 0.05  # 5% für unsichere Varianten
-    base_variant: str = "v1a"  # Fallback-Variante
-    blacklist_threshold: float = -0.2  # Reward-Schwellwert für Blacklist
-    min_pulls_for_blacklist: int = 20  # Min. Pulls vor Blacklist
-    min_pulls_for_confidence: int = 10  # Min. Pulls für Konfidenz
-    confidence_threshold: float = 0.7  # Konfidenz-Schwellwert
-    max_active_variants: int = 12  # Max. aktive Varianten
+BLACKLIST_MIN_SAMPLES = 20
+BLACKLIST_MIN_REWARD = -0.2
 
+class StatsProvider(Protocol):
+    def get_policy_stats(self, variant: str) -> dict: ...
+
+def load_state(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            txt = f.read().strip()
+            if not txt:
+                return {}
+            return json.loads(txt)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        return {}
+
+def save_state(path: str, state: dict) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    if os.path.exists(path):
+        os.replace(tmp, path)
+    else:
+        os.rename(tmp, path)
+
+def maybe_blacklist(guard: "DeployGuard", variant: str, stats_provider: StatsProvider):
+    if variant == guard.base_variant:
+        return
+    s = stats_provider.get_policy_stats(variant)
+    n = int(s.get("samples", 0))
+    r = float(s.get("reward_mean", 0.0))
+    if n >= BLACKLIST_MIN_SAMPLES and r < BLACKLIST_MIN_REWARD:
+        guard.blacklist.add(variant)
+
+class DeployConfig(BaseModel):
+    """Konfiguration für den Deployment Guard."""
+    base_variant: str = Field(default="v1a", description="Die stabile Basis-Variante, die immer verfügbar ist.")
+    traffic_split_new: float = Field(default=0.1, ge=0.0, le=1.0, description="Anteil des Traffics für neue Varianten (z.B. 0.1 = 10%).")
+    traffic_split_uncertain: float = Field(default=0.2, ge=0.0, le=1.0, description="Anteil des Traffics für unsichere Varianten.")
+    min_pulls_for_evaluation: int = Field(default=20, ge=1, description="Minimale Pulls, bevor eine Variante evaluiert wird.")
+    blacklist_threshold_reward: float = Field(default=-0.2, le=0.0, description="Schwellenwert für den mittleren Reward, unter dem eine Variante blacklisted wird.")
+    uncertainty_threshold_confidence: float = Field(default=0.6, ge=0.0, le=1.0, description="Konfidenz-Schwellenwert, unter dem eine Variante als unsicher gilt.")
+    max_active_variants: int = Field(default=5, ge=1, description="Maximale Anzahl gleichzeitig aktiver Varianten (exkl. Basis).")
+
+class DeployState(BaseModel):
+    """Speichert den Zustand des Deployment Guards für Persistenz."""
+    blacklisted_variants: List[str] = Field(default_factory=list, description="Varianten, die aufgrund schlechter Performance gesperrt sind.")
+    active_variants: List[str] = Field(default_factory=list, description="Varianten, die aktuell im Deployment aktiv sind (zusätzlich zur Basis).")
+    last_update: str = Field(default_factory=lambda: datetime.now().isoformat(), description="Letzter Zeitpunkt der Zustandsaktualisierung.")
+
+@dataclass
 class DeployGuard:
-    """Deployment-Guard für sichere Policy-Varianten-Deployment"""
+    """
+    Verwaltet das Deployment von Policy-Varianten (Shadow/A-B Deployment).
+    Stellt sicher, dass neue/unsichere Varianten nur begrenzt Traffic erhalten
+    und schlecht performende Varianten blacklisted werden.
+    """
+    variants: Set[str]
+    base_variant: str
+    max_traffic_per_variant: float = 0.10
+    blacklist: Set[str] = field(default_factory=set)
+    rng: _random.Random = field(default_factory=_random.Random)
     
-    def __init__(self, config: Optional[DeployConfig] = None):
-        self.config = config or DeployConfig()
-        self.bandit = PolicyBandit()
-        self.blacklisted_variants: Set[str] = set()
-        self.active_variants: Set[str] = set()
-        self._load_state()
+    def __post_init__(self):
+        self.variants = set(self.variants)
+        if self.base_variant not in self.variants:
+            raise ValueError(f"base_variant {self.base_variant} not in variants")
+        # Basis nie sperren
+        self.blacklist.discard(self.base_variant)
+    
+    @classmethod
+    def from_config(cls, cfg: dict):
+        variants = set(cfg["variants"])  # Pflichtfeld
+        base = cfg.get("base_variant", next(iter(variants)))
+        return cls(variants=variants, base_variant=base,
+                   max_traffic_per_variant=float(cfg.get("max_traffic_per_variant", 0.10)))
+    
+    def pick_variant(self, eligible: list[str]) -> str:
+        return self.rng.choice(eligible) if eligible else self.base_variant
+    
+    def get_eligible(self) -> list[str]:
+        return sorted([v for v in self.variants if v not in self.blacklist and v != self.base_variant])
+    
+    def get_deployment_status(self) -> dict:
+        return {"base_variant": self.base_variant,
+                "variants": sorted(self.variants),
+                "blacklist": sorted(self.blacklist),
+                "eligible": self.get_eligible()}
+
+class DeployGuardFull:
+    """
+    Vollständige DeployGuard-Implementierung mit allen Features
+    """
+    def __init__(self, config: Optional[DeployConfig] = None, state_file: str = os.path.join('data', 'rl', 'deploy_state.json')):
+        self.config = config if config else DeployConfig()
+        self.state_file = state_file
+        self.bandit = PolicyBandit() # Der Bandit ist für die Auswahl unter den aktiven Varianten zuständig
         
+        self.blacklisted_variants: Set[str] = set()
+        self.active_variants: Set[str] = set()  # Leer initialisieren
+        self.last_update: datetime = datetime.now()
+
+        self._load_state()
+        self._init_default_state() # Stellt sicher, dass Basis-Variante im State ist
+        self._update_metrics()
+
     def _load_state(self):
         """Lädt Deployment-State aus Datei"""
-        state_file = os.path.join('data', 'rl', 'deploy_state.json')
-        if os.path.exists(state_file):
+        if os.path.exists(self.state_file):
             try:
-                with open(state_file, 'r', encoding='utf-8') as f:
+                with open(self.state_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                self.blacklisted_variants = set(data.get('blacklisted_variants', []))
-                self.active_variants = set(data.get('active_variants', []))
-                logger.info(f"Deployment-State geladen: {len(self.active_variants)} aktive, {len(self.blacklisted_variants)} blacklisted")
+                state = DeployState.model_validate(data)
+                self.blacklisted_variants = set(state.blacklisted_variants)
+                self.active_variants = set(state.active_variants)
+                self.last_update = datetime.fromisoformat(state.last_update)
+                logger.info(f"Deployment-State geladen: {len(self.active_variants)} aktive, {len(self.blacklisted_variants)} blacklisted Varianten.")
             except Exception as e:
                 logger.error(f"Fehler beim Laden des Deployment-States: {e}")
-                self._init_default_state()
+                self._init_default_state() # Fallback zu Default-State
         else:
+            logger.info("Kein Deployment-State gefunden, initialisiere Standard-State.")
             self._init_default_state()
-            
+
     def _save_state(self):
         """Speichert Deployment-State in Datei"""
-        os.makedirs(os.path.dirname(os.path.join('data', 'rl', 'deploy_state.json')), exist_ok=True)
-        state_file = os.path.join('data', 'rl', 'deploy_state.json')
-        
-        data = {
-            'blacklisted_variants': list(self.blacklisted_variants),
-            'active_variants': list(self.active_variants),
-            'last_update': datetime.now().isoformat()
-        }
-        
-        with open(state_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-            
+        os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+        data = DeployState(
+            blacklisted_variants=list(self.blacklisted_variants),
+            active_variants=list(self.active_variants),
+            last_update=datetime.now().isoformat()
+        )
+        with open(self.state_file, 'w', encoding='utf-8') as f:
+            json.dump(data.model_dump(), f, indent=4)
+        self._update_metrics()
+
     def _init_default_state(self):
-        """Initialisiert Standard-State"""
-        self.active_variants = {self.config.base_variant}
-        self.blacklisted_variants = set()
+        """Stellt sicher, dass der Basis-State korrekt initialisiert ist."""
+        # Nur hinzufügen, wenn noch nicht vorhanden
+        if self.config.base_variant not in self.active_variants:
+            self.active_variants.add(self.config.base_variant)
         self._save_state()
-        
+
+    def _update_metrics(self):
+        """Aktualisiert Prometheus-Metriken."""
+        update_active_variants(len(self.active_variants))
+        update_blacklisted_variants(len(self.blacklisted_variants))
+        # Exploration Rate wird vom Bandit selbst aktualisiert
+
+    def _get_available_variants(self) -> List[str]:
+        """Gibt alle verfügbaren Varianten zurück, die nicht blacklisted sind."""
+        all_variants = set(self.bandit.state.variants.keys())
+        return list(all_variants - self.blacklisted_variants)
+
+    def _is_new_variant(self, variant_id: str) -> bool:
+        """Prüft, ob eine Variante neu ist (weniger als min_pulls_for_evaluation)."""
+        all_stats = get_policy_stats()
+        stats = all_stats.get(variant_id, {})
+        return stats.get('pulls', 0) < self.config.min_pulls_for_evaluation
+
+    def _is_uncertain_variant(self, variant_id: str) -> bool:
+        """Prüft, ob eine Variante unsicher ist (niedrige Konfidenz)."""
+        all_stats = get_policy_stats()
+        stats = all_stats.get(variant_id, {})
+        return stats.get('pulls', 0) >= self.config.min_pulls_for_evaluation and \
+               stats.get('confidence', 0.0) < self.config.uncertainty_threshold_confidence
+
+    def _update_blacklist(self):
+        """Überprüft aktive Varianten und verschiebt schlecht performende auf die Blacklist."""
+        all_stats = get_policy_stats()
+        for variant_id in list(self.active_variants): # Iteriere über eine Kopie
+            if variant_id == self.config.base_variant:
+                continue # Basis-Variante wird nie blacklisted
+
+            stats = all_stats.get(variant_id, {})
+            if stats.get('pulls', 0) >= self.config.min_pulls_for_evaluation:
+                if stats.get('mean_reward', 0.0) < self.config.blacklist_threshold_reward:
+                    self.blacklisted_variants.add(variant_id)
+                    self.active_variants.remove(variant_id)
+                    record_escalation("TOM", "general", variant_id) # Als Eskalation loggen
+                    logger.warning(f"Variante {variant_id} blacklisted: reward={stats['mean_reward']:.3f}, pulls={stats['pulls']}")
+        self._save_state()
+
     def select_variant_for_deployment(self, context: Optional[Dict[str, Any]] = None) -> str:
         """
-        Wählt Policy-Variante für Deployment basierend auf Traffic-Split-Regeln
-        Returns: Policy-Variante-ID
+        Wählt eine Policy-Variante für das aktuelle Deployment aus.
+        Berücksichtigt Traffic-Splitting für neue/unsichere Varianten und Blacklist.
         """
-        try:
-            # 1. Blacklist-Check
-            self._update_blacklist()
-            
-            # 2. Verfügbare Varianten ermitteln
-            available_variants = self._get_available_variants()
-            
-            if not available_variants:
-                logger.warning("Keine verfügbaren Varianten, verwende Base-Variante")
-                return self.config.base_variant
-                
-            # 3. Traffic-Split-Logik
-            import random
-            rand = random.random()
-            
-            # Neue Varianten (weniger als min_pulls_for_confidence)
-            new_variants = [v for v in available_variants if self._is_new_variant(v)]
-            if new_variants and rand < self.config.traffic_split_new:
-                selected = random.choice(new_variants)
-                logger.info(f"Neue Variante ausgewählt: {selected}")
-                record_policy_pull(selected)
-                return selected
-                
-            # Unsichere Varianten (niedrige Konfidenz)
-            uncertain_variants = [v for v in available_variants if self._is_uncertain_variant(v)]
-            if uncertain_variants and rand < self.config.traffic_split_uncertain:
-                selected = random.choice(uncertain_variants)
-                logger.info(f"Unsichere Variante ausgewählt: {selected}")
-                record_policy_pull(selected)
-                return selected
-                
-            # Bandit-Auswahl für restlichen Traffic
-            bandit_selected = self.bandit.select(context)
-            if bandit_selected and bandit_selected in available_variants:
-                logger.info(f"Bandit-Variante ausgewählt: {bandit_selected}")
-                record_policy_pull(bandit_selected)
-                return bandit_selected
-                
-            # Fallback zur Base-Variante
-            logger.info(f"Fallback zur Base-Variante: {self.config.base_variant}")
-            record_policy_pull(self.config.base_variant)
+        self._update_blacklist() # Vor jeder Auswahl Blacklist aktualisieren
+
+        available_for_bandit = list(self.active_variants - self.blacklisted_variants)
+        
+        # Wenn keine Varianten verfügbar sind, immer Basis-Variante zurückgeben
+        if not available_for_bandit:
+            logger.warning("Keine aktiven Varianten verfügbar, Fallback auf Basis-Variante.")
+            record_policy_pull("TOM", "general", self.config.base_variant)
             return self.config.base_variant
-            
-        except Exception as e:
-            logger.error(f"Fehler bei Varianten-Auswahl: {e}")
-            return self.config.base_variant
-            
-    def _get_available_variants(self) -> List[str]:
-        """Gibt verfügbare (nicht-blacklisted) Varianten zurück"""
-        all_variants = set(self.bandit.state.variants.keys())
-        available = all_variants - self.blacklisted_variants
-        return list(available)
+
+        # Priorisiere neue/unsichere Varianten für Traffic-Split
+        new_variants = [v for v in available_for_bandit if self._is_new_variant(v)]
+        uncertain_variants = [v for v in available_for_bandit if self._is_uncertain_variant(v) and v not in new_variants]
         
-    def _is_new_variant(self, variant_id: str) -> bool:
-        """Prüft ob Variante neu ist (weniger als min_pulls_for_confidence)"""
-        stats = get_policy_stats(variant_id)
-        return stats.get('pulls', 0) < self.config.min_pulls_for_confidence
+        selected_variant = None
+
+        # Traffic-Split für neue Varianten
+        if new_variants and _random.random() < self.config.traffic_split_new:
+            selected_variant = _random.choice(new_variants)
+            logger.debug(f"Deployment Guard wählt neue Variante (Traffic Split): {selected_variant}")
         
-    def _is_uncertain_variant(self, variant_id: str) -> bool:
-        """Prüft ob Variante unsicher ist (niedrige Konfidenz)"""
-        stats = get_policy_stats(variant_id)
-        confidence = stats.get('confidence', 0.0)
-        pulls = stats.get('pulls', 0)
-        
-        return (pulls >= self.config.min_pulls_for_confidence and 
-                confidence < self.config.confidence_threshold)
-                
-    def _update_blacklist(self):
-        """Aktualisiert Blacklist basierend auf Reward-Schwellwerten"""
-        updated = False
-        
-        for variant_id in list(self.active_variants):
-            if variant_id in self.blacklisted_variants:
-                continue
-                
-            stats = get_policy_stats(variant_id)
-            pulls = stats.get('pulls', 0)
-            mean_reward = stats.get('mean_reward', 0.0)
-            
-            # Blacklist-Kriterien prüfen
-            if (pulls >= self.config.min_pulls_for_blacklist and 
-                mean_reward < self.config.blacklist_threshold):
-                
-                self.blacklisted_variants.add(variant_id)
-                self.active_variants.discard(variant_id)
-                updated = True
-                logger.warning(f"Variante {variant_id} blacklisted: reward={mean_reward:.3f}, pulls={pulls}")
-                record_escalation(variant_id)
-                
-        if updated:
-            self._save_state()
-            update_active_variants(len(self.active_variants))
-            update_blacklisted_variants(len(self.blacklisted_variants))
-            
+        # Traffic-Split für unsichere Varianten (wenn keine neue gewählt wurde)
+        if not selected_variant and uncertain_variants and _random.random() < self.config.traffic_split_uncertain:
+            selected_variant = _random.choice(uncertain_variants)
+            logger.debug(f"Deployment Guard wählt unsichere Variante (Traffic Split): {selected_variant}")
+
+        # Wenn kein Traffic-Split zutrifft, oder keine speziellen Varianten, nutze Bandit
+        if not selected_variant:
+            # Bandit wählt nur aus den aktiven, nicht blacklisted Varianten
+            self.bandit.state.variants = {k: v for k, v in self.bandit.state.variants.items() if k in available_for_bandit}
+            selected_variant = self.bandit.select(context)
+            if not selected_variant: # Fallback, falls Bandit nichts zurückgibt
+                selected_variant = self.config.base_variant
+            logger.debug(f"Deployment Guard wählt Variante über Bandit: {selected_variant}")
+
+        record_policy_pull("TOM", "general", selected_variant)
+        return selected_variant
+
     def add_variant_to_deployment(self, variant_id: str) -> bool:
-        """
-        Fügt neue Variante zum Deployment hinzu
-        Returns: True wenn erfolgreich hinzugefügt
-        """
-        try:
-            if variant_id in self.blacklisted_variants:
-                logger.warning(f"Variante {variant_id} ist blacklisted")
-                return False
-                
-            if len(self.active_variants) >= self.config.max_active_variants:
-                logger.warning(f"Maximale Anzahl aktiver Varianten erreicht: {self.config.max_active_variants}")
-                return False
-                
-            self.active_variants.add(variant_id)
-            self._save_state()
-            update_active_variants(len(self.active_variants))
-            
-            logger.info(f"Variante {variant_id} zum Deployment hinzugefügt")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Hinzufügen der Variante {variant_id}: {e}")
+        """Fügt eine Variante zum aktiven Deployment hinzu."""
+        if variant_id in self.blacklisted_variants:
+            logger.warning(f"Variante '{variant_id}' ist blacklisted und kann nicht hinzugefügt werden.")
             return False
-            
+        if len(self.active_variants) >= self.config.max_active_variants + 1: # +1 für Basis-Variante
+            logger.warning(f"Maximale Anzahl aktiver Varianten ({self.config.max_active_variants}) erreicht. Kann '{variant_id}' nicht hinzufügen.")
+            return False
+        
+        self.active_variants.add(variant_id)
+        self._save_state()
+        logger.info(f"Variante '{variant_id}' zum Deployment hinzugefügt.")
+        return True
+
     def remove_variant_from_deployment(self, variant_id: str) -> bool:
-        """
-        Entfernt Variante aus Deployment
-        Returns: True wenn erfolgreich entfernt
-        """
-        try:
-            if variant_id not in self.active_variants:
-                logger.warning(f"Variante {variant_id} ist nicht aktiv")
-                return False
-                
-            self.active_variants.discard(variant_id)
-            self._save_state()
-            update_active_variants(len(self.active_variants))
-            
-            logger.info(f"Variante {variant_id} aus Deployment entfernt")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Entfernen der Variante {variant_id}: {e}")
+        """Entfernt eine Variante aus dem aktiven Deployment."""
+        if variant_id == self.config.base_variant:
+            logger.warning("Basis-Variante kann nicht aus dem Deployment entfernt werden.")
             return False
-            
+        if variant_id in self.active_variants:
+            self.active_variants.remove(variant_id)
+            self._save_state()
+            logger.info(f"Variante '{variant_id}' aus dem Deployment entfernt.")
+            return True
+        logger.warning(f"Variante '{variant_id}' ist nicht im aktiven Deployment.")
+        return False
+
     def get_deployment_status(self) -> Dict[str, Any]:
-        """Gibt aktuellen Deployment-Status zurück"""
+        """Gibt den aktuellen Status des Deployments zurück."""
         return {
-            'active_variants': list(self.active_variants),
-            'blacklisted_variants': list(self.blacklisted_variants),
-            'total_active': len(self.active_variants),
-            'total_blacklisted': len(self.blacklisted_variants),
-            'config': {
-                'traffic_split_new': self.config.traffic_split_new,
-                'traffic_split_uncertain': self.config.traffic_split_uncertain,
-                'base_variant': self.config.base_variant,
-                'blacklist_threshold': self.config.blacklist_threshold,
-                'min_pulls_for_blacklist': self.config.min_pulls_for_blacklist,
-                'max_active_variants': self.config.max_active_variants
-            }
+            'active_variants': sorted(list(self.active_variants)),
+            'blacklisted_variants': sorted(list(self.blacklisted_variants)),
+            'base_variant': self.config.base_variant,
+            'last_update': self.last_update.isoformat(),
+            'config': self.config.model_dump()
         }
-        
+
     def get_variant_health(self, variant_id: str) -> Dict[str, Any]:
-        """Gibt Gesundheitsstatus einer Variante zurück"""
-        stats = get_policy_stats(variant_id)
-        
-        health_status = {
-            'variant_id': variant_id,
-            'is_active': variant_id in self.active_variants,
-            'is_blacklisted': variant_id in self.blacklisted_variants,
-            'is_new': self._is_new_variant(variant_id),
-            'is_uncertain': self._is_uncertain_variant(variant_id),
+        """Gibt Gesundheitsinformationen für eine spezifische Variante zurück."""
+        all_stats = get_policy_stats()
+        stats = all_stats.get(variant_id, {})
+        is_active = variant_id in self.active_variants
+        is_blacklisted = variant_id in self.blacklisted_variants
+        is_new = self._is_new_variant(variant_id)
+        is_uncertain = self._is_uncertain_variant(variant_id)
+
+        return {
+            'id': variant_id,
+            'is_active': is_active,
+            'is_blacklisted': is_blacklisted,
+            'is_new': is_new,
+            'is_uncertain': is_uncertain,
             'stats': stats
         }
-        
-        # Gesundheitsbewertung
-        if variant_id in self.blacklisted_variants:
-            health_status['health'] = 'blacklisted'
-        elif self._is_new_variant(variant_id):
-            health_status['health'] = 'new'
-        elif self._is_uncertain_variant(variant_id):
-            health_status['health'] = 'uncertain'
-        else:
-            health_status['health'] = 'stable'
-            
-        return health_status
 
 # Convenience-Funktionen
-_deploy_guard: Optional[DeployGuard] = None
+_deploy_guard: Optional[DeployGuardFull] = None
 
-def _get_deploy_guard() -> DeployGuard:
+def _get_deploy_guard() -> DeployGuardFull:
     global _deploy_guard
     if _deploy_guard is None:
-        _deploy_guard = DeployGuard()
+        _deploy_guard = DeployGuardFull()
     return _deploy_guard
 
 def select_variant_for_deployment(context: Optional[Dict[str, Any]] = None) -> str:
-    """Wählt Policy-Variante für Deployment"""
     return _get_deploy_guard().select_variant_for_deployment(context)
 
 def add_variant_to_deployment(variant_id: str) -> bool:
-    """Fügt Variante zum Deployment hinzu"""
     return _get_deploy_guard().add_variant_to_deployment(variant_id)
 
 def remove_variant_from_deployment(variant_id: str) -> bool:
-    """Entfernt Variante aus Deployment"""
     return _get_deploy_guard().remove_variant_from_deployment(variant_id)
 
 def get_deployment_status() -> Dict[str, Any]:
-    """Gibt Deployment-Status zurück"""
     return _get_deploy_guard().get_deployment_status()
 
 def get_variant_health(variant_id: str) -> Dict[str, Any]:
-    """Gibt Varianten-Gesundheitsstatus zurück"""
     return _get_deploy_guard().get_variant_health(variant_id)
