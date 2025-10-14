@@ -21,23 +21,33 @@ class RealtimeConfig:
     
     # STT-Konfiguration
     REALTIME_STT: RealtimeMode = RealtimeMode(
-        os.getenv('REALTIME_STT', 'off')
+        os.getenv('REALTIME_STT', 'local')
     )
     
     # LLM-Konfiguration  
     REALTIME_LLM: RealtimeMode = RealtimeMode(
-        os.getenv('REALTIME_LLM', 'mock')
+        os.getenv('REALTIME_LLM', 'local')
     )
     
     # TTS-Konfiguration
     REALTIME_TTS: RealtimeMode = RealtimeMode(
-        os.getenv('REALTIME_TTS', 'mock')
+        os.getenv('REALTIME_TTS', 'local')
     )
     
     # Provider-spezifische Konfiguration
     LLM_PROVIDER_URL: Optional[str] = os.getenv('LLM_PROVIDER_URL')
     LLM_PROVIDER_KEY: Optional[str] = os.getenv('LLM_PROVIDER_KEY')
     LLM_MODEL: str = os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
+    
+    # Azure Speech Services
+    AZURE_SPEECH_KEY: Optional[str] = os.getenv('AZURE_SPEECH_KEY')
+    AZURE_SPEECH_REGION: Optional[str] = os.getenv('AZURE_SPEECH_REGION')
+    AZURE_SPEECH_LANGUAGE: str = os.getenv('AZURE_SPEECH_LANGUAGE', 'de-DE')
+    
+    # Azure TTS
+    AZURE_TTS_KEY: Optional[str] = os.getenv('AZURE_TTS_KEY')
+    AZURE_TTS_REGION: Optional[str] = os.getenv('AZURE_TTS_REGION')
+    AZURE_TTS_VOICE: str = os.getenv('AZURE_TTS_VOICE', 'de-DE-KatjaNeural')
     
     # TTS-spezifische Konfiguration
     TTS_PIPER_PATH: str = os.getenv('TTS_PIPER_PATH', '/usr/local/bin/piper')

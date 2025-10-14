@@ -13,7 +13,7 @@ aiohttp>=3.8.0
 uvloop>=0.17.0
 
 # Redis & Message Queue
-redis[hiredis]>=4.5.0
+redis[hiredis]>=3.5.0,<4.0.0
 redis-py-cluster>=2.1.0
 
 # AI & ML
@@ -66,7 +66,9 @@ aiofiles>=23.0.0
 python-multipart>=0.0.6
 python-jose[cryptography]>=3.3.0
 async-timeout>=4.0.0  # Für Redis async
-redis[hiredis]>=4.5.0  # Redis mit verbesserter Performance
+# Redis & Message Queue
+redis[hiredis]>=3.5.0,<4.0.0
+redis-py-cluster>=2.1.0
 
 # Optional: For enhanced performance
 orjson>=3.9.0  # Schneller JSON
