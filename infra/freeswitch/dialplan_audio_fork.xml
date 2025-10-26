@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+  TOM v3.0 - FreeSWITCH Dialplan für Audio Fork
+  WSS-Fork zu TOM Gateway mit PCM16 Streaming
+-->
+<include>
+  <extension name="tom_audio_fork">
+    <condition field="destination_number" expression="^(\d+)$">
+      <!-- Call-ID aus UUID extrahieren -->
+      <action application="set" data="call_id=${uuid}"/>
+      
+      <!-- TOD-Metadata -->
+      <action application="set" data="tod_url=wss://tom.local:7443/ws/stream?call_id=${call_id}"/>
+      <action application="set" data="tod_host=tom.local"/>
+      <action application="set" data="tod_port=7443"/>
+      <action application="set" data="tod_format=PCM16"/>
+      <action application="set" data="tod_codec=PCMU"/>
+      
+      <!-- Audio Fork aktivieren -->
+      <action application="answer"/>
+      
+      <!-- WebSocket Audio Fork (bidirektional) -->
+      <action application="tone_detect" data="audio_fork wss://tom.local:7443/ws/stream?call_id=${call_id}"/>
+      
+      <!-- Park Session (für Rückkanal) -->
+      <action application="park"/>
+      
+      <!-- Fallback für Timeout -->
+      <action application="hangup" data="NORMAL_CLEARING"/>
+    </condition>
+  </extension>
+</include>
+

@@ -91,6 +91,151 @@ rl_escalation_total = Counter(
     registry=rl_registry
 )
 
+# ToolHub-Metriken
+tom_tool_calls_total = Counter(
+    'tom_tool_calls_total',
+    'Total number of tool calls',
+    ['tool', 'source'],
+    registry=rl_registry
+)
+
+tom_tool_latency_ms = Histogram(
+    'tom_tool_latency_ms',
+    'Tool call latency in milliseconds',
+    ['tool', 'source'],
+    buckets=[10, 50, 100, 200, 500, 1000, 2000, 5000],
+    registry=rl_registry
+)
+
+tom_tool_calls_failed_total = Counter(
+    'tom_tool_calls_failed_total',
+    'Total number of failed tool calls',
+    ['tool', 'source'],
+    registry=rl_registry
+)
+
+# Pipeline-Metriken
+tom_pipeline_e2e_latency_seconds = Histogram(
+    'tom_pipeline_e2e_latency_seconds',
+    'End-to-end pipeline latency',
+    ['call_id_hash'],
+    buckets=[0.1, 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0],
+    registry=rl_registry
+)
+
+tom_stt_latency_seconds = Histogram(
+    'tom_stt_latency_seconds',
+    'STT processing latency',
+    registry=rl_registry
+)
+
+tom_llm_latency_seconds = Histogram(
+    'tom_llm_latency_seconds',
+    'LLM processing latency',
+    registry=rl_registry
+)
+
+tom_tts_latency_seconds = Histogram(
+    'tom_tts_latency_seconds',
+    'TTS processing latency',
+    registry=rl_registry
+)
+
+tom_pipeline_backpressure_total = Counter(
+    'tom_pipeline_backpressure_total',
+    'Pipeline backpressure events',
+    registry=rl_registry
+)
+
+# Telefonie-Metriken
+tom_telephony_active_calls_total = Gauge(
+    'tom_telephony_active_calls_total',
+    'Number of active calls',
+    registry=rl_registry
+)
+
+tom_telephony_calls_total = Counter(
+    'tom_telephony_calls_total',
+    'Total number of calls',
+    registry=rl_registry
+)
+
+tom_telephony_calls_failed_total = Counter(
+    'tom_telephony_calls_failed_total',
+    'Total number of failed calls',
+    registry=rl_registry
+)
+
+tom_telephony_call_duration_seconds = Histogram(
+    'tom_telephony_call_duration_seconds',
+    'Call duration distribution',
+    buckets=[10, 30, 60, 120, 300, 600, 900, 1800],
+    registry=rl_registry
+)
+
+tom_telephony_barge_in_latency_seconds = Histogram(
+    'tom_telephony_barge_in_latency_seconds',
+    'Barge-in latency',
+    registry=rl_registry
+)
+
+# Error-Metriken
+tom_errors_total = Counter(
+    'tom_errors_total',
+    'Total number of errors',
+    ['component'],
+    registry=rl_registry
+)
+
+# Realtime-Backend-Metriken
+tom_realtime_backend = Gauge(
+    'tom_realtime_backend',
+    'Active Realtime backend (provider or local)',
+    ['backend'],
+    registry=rl_registry
+)
+
+tom_provider_failover_total = Counter(
+    'tom_provider_failover_total',
+    'Total number of provider failovers to local',
+    registry=rl_registry
+)
+
+tom_realtime_e2e_ms = Histogram(
+    'tom_realtime_e2e_ms',
+    'Realtime E2E latency in milliseconds',
+    ['backend'],
+    buckets=[100, 200, 300, 400, 500, 600, 700, 800, 1000, 1500],
+    registry=rl_registry
+)
+
+# Globale Metriken-Instanz für einfachen Zugriff
+class Metrics:
+    """Zentrale Metriken-Klasse"""
+    
+    def __init__(self):
+        self.tom_tool_calls_total = tom_tool_calls_total
+        self.tom_tool_latency_ms = tom_tool_latency_ms
+        self.tom_tool_calls_failed_total = tom_tool_calls_failed_total
+        self.tom_pipeline_e2e_latency_seconds = tom_pipeline_e2e_latency_seconds
+        self.tom_stt_latency_seconds = tom_stt_latency_seconds
+        self.tom_llm_latency_seconds = tom_llm_latency_seconds
+        self.tom_tts_latency_seconds = tom_tts_latency_seconds
+        self.tom_pipeline_backpressure_total = tom_pipeline_backpressure_total
+        self.tom_telephony_active_calls_total = tom_telephony_active_calls_total
+        self.tom_telephony_calls_total = tom_telephony_calls_total
+        self.tom_telephony_calls_failed_total = tom_telephony_calls_failed_total
+        self.tom_telephony_call_duration_seconds = tom_telephony_call_duration_seconds
+        self.tom_telephony_barge_in_latency_seconds = tom_telephony_barge_in_latency_seconds
+        self.tom_errors_total = tom_errors_total
+        self.tom_realtime_backend = tom_realtime_backend
+        self.tom_provider_failover_total = tom_provider_failover_total
+        self.tom_realtime_e2e_ms = tom_realtime_e2e_ms
+
+
+# Globale Metriken-Instanz
+metrics = Metrics()
+
 class RLMetricsExporter:
     """Exportiert RL-Metriken nach Prometheus"""
     

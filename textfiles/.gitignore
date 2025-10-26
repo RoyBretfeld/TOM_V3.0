@@ -1,0 +1,5 @@
+# TOM v3.0 - Host Inventory Textfiles
+# Diese Dateien werden vom host_inventory.py generiert
+
+*.prom
+

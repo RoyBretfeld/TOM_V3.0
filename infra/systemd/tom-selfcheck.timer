@@ -1,0 +1,11 @@
+[Unit]
+Description=TOM v3.0 - Light Selfcheck (minutely)
+Requires=tom-selfcheck.service
+
+[Timer]
+OnCalendar=*-*-* *:00/1
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

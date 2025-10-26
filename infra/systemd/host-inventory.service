@@ -1,0 +1,22 @@
+# TOM v3.0 - Host Inventory Service
+# Sammelt Hardware-Infos für Prometheus
+
+[Unit]
+Description=Host inventory exporter for Prometheus
+After=network.target
+
+[Service]
+Type=oneshot
+Environment="HOST_INVENTORY_OUT=/var/lib/node_exporter/textfile_collector/host_inventory.prom"
+Environment="OLLAMA_URL=http://127.0.0.1:11434"
+Environment="CHROMA_URL=http://127.0.0.1:8000"
+Environment="PIPER_BIN=piper"
+ExecStart=/usr/bin/python3 /opt/tom/tools/host_inventory.py
+User=nodeexp
+Group=nodeexp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

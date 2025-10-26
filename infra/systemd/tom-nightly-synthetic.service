@@ -1,0 +1,17 @@
+[Unit]
+Description=TOM v3.0 - Nightly Synthetic Call
+After=network.target
+
+[Service]
+Type=oneshot
+User=tom
+WorkingDirectory=/opt/tom
+Environment="PATH=/opt/tom/venv/bin"
+ExecStart=/opt/tom/venv/bin/python -m scripts.synthetic_call --run-id nightly
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=300
+
+[Install]
+WantedBy=multi-user.target
+

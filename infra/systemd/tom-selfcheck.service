@@ -1,0 +1,17 @@
+[Unit]
+Description=TOM v3.0 - Light Selfcheck
+After=network.target
+
+[Service]
+Type=oneshot
+User=tom
+WorkingDirectory=/opt/tom
+Environment="PATH=/opt/tom/venv/bin"
+ExecStart=/opt/tom/venv/bin/python -m apps.monitor.selfcheck
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+

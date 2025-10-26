@@ -29,8 +29,16 @@ class OllamaLLMStreamer:
             self.client = ollama.Client()
             
             # Verfügbare Modelle prüfen
-            models = self.client.list()
-            available_models = [model['name'] for model in models['models']]
+            models_response = self.client.list()
+            logger.info(f"Ollama Response Type: {type(models_response)}")
+            logger.info(f"Ollama Response: {models_response}")
+            
+            # Pydantic Model-Objekt behandeln
+            if hasattr(models_response, 'models') and models_response.models:
+                available_models = [model.model for model in models_response.models]
+            else:
+                logger.error(f"Unerwartete Ollama-Response-Struktur: {models_response}")
+                available_models = []
             
             logger.info(f"Verfügbare Ollama-Modelle: {available_models}")
             
@@ -50,15 +58,7 @@ class OllamaLLMStreamer:
     async def process_text(self, text: str, context: Optional[dict] = None) -> AsyncGenerator[dict, None]:
         """Verarbeitet Text mit Ollama LLM"""
         if not self.client:
-            # Fallback zu Mock
-            await asyncio.sleep(0.2)
-            yield {
-                'type': 'llm_token',
-                'text': 'Ollama nicht verfügbar - Mock-Antwort',
-                'provider': 'mock_fallback',
-                'timestamp': datetime.now().isoformat()
-            }
-            return
+            raise Exception("Ollama-Client nicht verfügbar")
         
         try:
             # System-Prompt erstellen
@@ -70,12 +70,7 @@ class OllamaLLMStreamer:
                 
         except Exception as e:
             logger.error(f"Ollama LLM Fehler: {e}")
-            yield {
-                'type': 'llm_error',
-                'error': str(e),
-                'provider': 'ollama',
-                'timestamp': datetime.now().isoformat()
-            }
+            raise Exception(f"Ollama-Fehler: {e}")
     
     def _create_system_prompt(self, context: Optional[dict] = None) -> str:
         """Erstellt System-Prompt basierend auf Kontext"""

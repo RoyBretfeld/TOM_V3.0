@@ -1,0 +1,174 @@
+# TOM v3.0 - Prometheus Alert Rules
+
+groups:
+  - name: tom_pipeline_latency
+    interval: 10m
+    rules:
+      - alert: HighE2ELatency
+        expr: histogram_quantile(0.95, tom_pipeline_e2e_latency_seconds) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: pipeline
+        annotations:
+          summary: "High E2E Latency (p95 > 800ms)"
+          description: "E2E Pipeline Latenz übersteigt 800ms (p95)"
+
+      - alert: HighSTTLatency
+        expr: histogram_quantile(0.95, tom_stt_latency_seconds) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: stt
+        annotations:
+          summary: "High STT Latency (p95 > 300ms)"
+          description: "STT Latenz übersteigt 300ms (p95)"
+
+      - alert: HighLLMLatency
+        expr: histogram_quantile(0.95, tom_llm_latency_seconds) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "High LLM Latency (p95 > 500ms)"
+          description: "LLM Latenz übersteigt 500ms (p95)"
+
+      - alert: HighTTSLatency
+        expr: histogram_quantile(0.95, tom_tts_latency_seconds) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: tts
+        annotations:
+          summary: "High TTS Latency (p95 > 200ms)"
+          description: "TTS Latenz übersteigt 200ms (p95)"
+
+  - name: tom_gpu_usage
+    interval: 5m
+    rules:
+      - alert: HighGPUUsage
+        expr: dcgm_fb_used_bytes / dcgm_fb_total_bytes > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "High GPU Memory Usage (> 90%)"
+          description: "GPU Memory Usage übersteigt 90%"
+
+      - alert: GPUUtilizationHigh
+        expr: dcgm_gpu_utilization > 95
+        for: 10m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU Utilization (> 95%)"
+          description: "GPU Utilization konstant über 95%"
+
+  - name: tom_backpressure
+    interval: 5m
+    rules:
+      - alert: BackpressureDetected
+        expr: tom_pipeline_backpressure_total > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: pipeline
+        annotations:
+          summary: "Backpressure detected"
+          description: "Pipeline hat Backpressure (Blockierung)"
+
+  - name: tom_rl_system
+    interval: 10m
+    rules:
+      - alert: LowRLReward
+        expr: avg_over_time(tom_rl_reward_average[10m]) < -0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: rl
+        annotations:
+          summary: "Low RL Reward (< -0.2)"
+          description: "RL System Reward unter -0.2 für 10 Minuten"
+
+      - alert: HighRLBlacklistedVariants
+        expr: tom_rl_blacklisted_variants_total > 2
+        for: 5m
+        labels:
+          severity: critical
+          component: rl
+        annotations:
+          summary: "Too many blacklisted variants (> 2)"
+          description: "Mehr als 2 RL-Varianten blacklisted"
+
+      - alert: RLLowExplorationRate
+        expr: tom_rl_exploration_rate < 0.05
+        for: 30m
+        labels:
+          severity: warning
+          component: rl
+        annotations:
+          summary: "Low RL Exploration Rate (< 5%)"
+          description: "RL Exploration Rate unter 5% für 30 Minuten"
+
+  - name: tom_service_availability
+    interval: 5m
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"tom-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: service
+        annotations:
+          summary: "Service down: {{ $labels.job }}"
+          description: "Service {{ $labels.job }} ist down"
+
+  - name: tom_telephony
+    interval: 5m
+    rules:
+      - alert: HighCallFailureRate
+        expr: rate(tom_telephony_calls_failed_total[5m]) / rate(tom_telephony_calls_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: telephony
+        annotations:
+          summary: "High Call Failure Rate (> 10%)"
+          description: "Telefonie Failure Rate übersteigt 10%"
+
+      - alert: HighBargeInLatency
+        expr: histogram_quantile(0.95, tom_telephony_barge_in_latency_seconds) > 0.12
+        for: 5m
+        labels:
+          severity: warning
+          component: telephony
+        annotations:
+          summary: "High Barge-In Latency (p95 > 120ms)"
+          description: "Barge-In Latenz übersteigt 120ms (p95)"
+
+  - name: tom_toolhub
+    interval: 5m
+    rules:
+      - alert: HighToolLatency
+        expr: histogram_quantile(0.95, tom_tool_latency_ms{tool=~"autoteilepilot|pdf_catalog|chromadb"}) > 2000
+        for: 5m
+        labels:
+          severity: warning
+          component: toolhub
+        annotations:
+          summary: "High Tool Latency (p95 > 2s)"
+          description: "Tool {{ $labels.tool }} Latenz übersteigt 2s (p95)"
+
+      - alert: ToolCallFailureRate
+        expr: rate(tom_tool_calls_failed_total[5m]) / rate(tom_tool_calls_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: toolhub
+        annotations:
+          summary: "High Tool Call Failure Rate (> 5%)"
+          description: "Tool Call Failure Rate übersteigt 5%"
+

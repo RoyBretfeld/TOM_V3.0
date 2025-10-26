@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:v2.40.0
+    container_name: tom-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - tom-network
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:9.5.0
+    container_name: tom-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=CHANGE_ME
+    networks:
+      - tom-network
+    depends_on:
+      - prometheus
+
+  # Loki (Logs)
+  loki:
+    image: grafana/loki:2.8.0
+    container_name: tom-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - tom-network
+
+  # Promtail (Log Collector)
+  promtail:
+    image: grafana/promtail:2.8.0
+    container_name: tom-promtail
+    volumes:
+      - ./logs:/var/log/tom
+      - ./infra/promtail:/etc/promtail
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - tom-network
+    depends_on:
+      - loki
+
+  # DCGM Exporter (NVIDIA GPU Metrics)
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.1.2-3.1.0-ubuntu20.04
+    container_name: tom-dcgm
+    ports:
+      - "9400:9400"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - tom-network
+
+  # Node Exporter (System Metrics)
+  node-exporter:
+    image: prom/node-exporter:v1.5.0
+    container_name: tom-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - ./textfiles:/textfiles:rw
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.textfile.directory=/textfiles'
+    networks:
+      - tom-network
+
+  # cAdvisor (Container Metrics)
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.46.0
+    container_name: tom-cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    networks:
+      - tom-network
+
+  # ChromaDB Exporter (Embedding Metrics)
+  chroma-exporter:
+    image: chromadb/chroma:0.4.15
+    container_name: tom-chroma-exporter
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    networks:
+      - tom-network
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  chroma_data:
+
+networks:
+  tom-network:
+    external: false
+

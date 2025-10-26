@@ -1,0 +1,15 @@
+# TOM v3.0 - Host Inventory Timer
+# Aktualisiert alle 30 Sekunden
+
+[Unit]
+Description=Run host inventory exporter every 30s
+Requires=host-inventory.service
+
+[Timer]
+OnBootSec=15
+OnUnitActiveSec=30
+Unit=host-inventory.service
+
+[Install]
+WantedBy=timers.target
+

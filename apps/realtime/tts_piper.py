@@ -35,10 +35,23 @@ class PiperTTSStreamer:
             
             logger.info(f"Lade Piper-Stimme: {voice_name}")
             
-            # Piper initialisieren
+            # Lokale Pfade zu den heruntergeladenen Modellen
+            model_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'models', 'piper', f"{voice_name}.onnx")
+            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'models', 'piper', f"{voice_name}.onnx.json")
+            
+            logger.info(f"Modell-Pfad: {model_path}")
+            logger.info(f"Config-Pfad: {config_path}")
+            
+            # Prüfen ob Dateien existieren
+            if not os.path.exists(model_path) or not os.path.exists(config_path):
+                logger.error(f"Piper-Modelle nicht gefunden: {model_path} oder {config_path}")
+                self.voice = None
+                return
+            
+            # Piper mit lokalen Dateien initialisieren
             self.voice = piper.PiperVoice.load(
-                model_path=f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx",
-                config_path=f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx.json"
+                model_path=model_path,
+                config_path=config_path
             )
             
             logger.info("Piper TTS erfolgreich geladen")

@@ -1,0 +1,12 @@
+[Unit]
+Description=TOM v3.0 - Nightly Synthetic Call at 03:15
+Requires=tom-nightly-synthetic.service
+
+[Timer]
+OnCalendar=daily
+OnCalendar=03:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

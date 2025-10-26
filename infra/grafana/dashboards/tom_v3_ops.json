@@ -1,0 +1,169 @@
+{
+  "dashboard": {
+    "title": "TOM v3.0 - Operations Dashboard",
+    "tags": ["tom", "v3", "telephony", "ai"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Telephony - Active Calls",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "tom_telephony_active_calls_total"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Telephony - Call Duration",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, tom_telephony_call_duration_seconds)",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.50, tom_telephony_call_duration_seconds)",
+            "legendFormat": "p50"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Pipeline Latency - E2E",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, tom_pipeline_e2e_latency_seconds)",
+            "legendFormat": "E2E p95"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
+      },
+      {
+        "id": 4,
+        "title": "Pipeline Latency - Components",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, tom_stt_latency_seconds)",
+            "legendFormat": "STT"
+          },
+          {
+            "expr": "histogram_quantile(0.95, tom_llm_latency_seconds)",
+            "legendFormat": "LLM"
+          },
+          {
+            "expr": "histogram_quantile(0.95, tom_tts_latency_seconds)",
+            "legendFormat": "TTS"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4}
+      },
+      {
+        "id": 5,
+        "title": "GPU Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "(dcgm_fb_used_bytes / dcgm_fb_total_bytes) * 100",
+            "legendFormat": "GPU Memory %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12}
+      },
+      {
+        "id": 6,
+        "title": "GPU Utilization",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "dcgm_gpu_utilization",
+            "legendFormat": "GPU %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12}
+      },
+      {
+        "id": 7,
+        "title": "RL - Rewards over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg_over_time(tom_rl_reward_average[10m])",
+            "legendFormat": "Avg Reward"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20}
+      },
+      {
+        "id": 8,
+        "title": "RL - Active Variants",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "tom_rl_active_variants_total"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 20}
+      },
+      {
+        "id": 9,
+        "title": "RL - Blacklisted Variants",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "tom_rl_blacklisted_variants_total"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 20}
+      },
+      {
+        "id": 10,
+        "title": "ToolHub - Quellenmix",
+        "type": "bargraph",
+        "targets": [
+          {
+            "expr": "sum by (source) (tom_tool_calls_total)",
+            "legendFormat": "{{source}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28}
+      },
+      {
+        "id": 11,
+        "title": "ToolHub - Source Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, tom_tool_latency_ms{source=~\"autoteilepilot|pdf_catalog|chromadb\"})",
+            "legendFormat": "{{source}} p95"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28}
+      },
+      {
+        "id": 12,
+        "title": "Errors by Component",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "sum by (component) (tom_errors_total)",
+            "legendFormat": "{{component}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36}
+      }
+    ],
+    "annotations": {
+      "list": []
+    },
+    "schemaVersion": 30,
+    "version": 1
+  }
+}
+

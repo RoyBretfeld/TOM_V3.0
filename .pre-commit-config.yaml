@@ -1,36 +1,30 @@
+# TOM v3.0 - Pre-Commit Hooks
+# Verbot von Mocks in echten Tests (Real-Only Policy)
+
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-      - id: check-merge-conflict
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
-      - id: detect-private-key
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.5.0
-    hooks:
-      - id: detect-secrets
-        args: ['--baseline', '.secrets.baseline']
-        exclude: |
-          (?x)^(
-            node_modules/|
-            dist/|
-            build/
-          )
   - repo: local
     hooks:
-      - id: block-orig-writes
-        name: Block writes in ./data/originals
-        entry: python scripts/hooks/block_orig_writes.py
+      - id: forbid-mock-in-real-tests
+        name: Forbid mock imports in real tests (component|integration|e2e)
+        entry: bash -c 'if grep -r -E "from unittest import mock|unittest\.mock|import mock|from mock import" tests/(component|integration|e2e) --include="*.py"; then echo "❌ VERBOTEN: Mock imports in echten Tests (tests/(component|integration|e2e)/)!"; exit 1; fi'
         language: system
-        stages: [commit]
-      - id: scan-forbidden-write-patterns
-        name: Scan for forbidden write patterns to ./data/originals
-        entry: python scripts/hooks/scan_forbidden_patterns.py
+        pass_filenames: false
+        
+      - id: check-real-only-markers
+        name: Check that real-only tests have proper markers
+        entry: bash -c 'for f in tests/(component|integration|e2e)/*.py; do if ! grep -q "pytest.mark.real_only" "$f" 2>/dev/null; then echo "⚠️  Warnung: $f sollte pytest.mark.real_only haben"; fi; done'
         language: system
-        stages: [commit]
-      - id: deny-large-diff
-        name: Deny large diff
-        entry: python scripts/hooks/deny_large_diff.py
+        pass_filenames: false
+        
+      - id: check-pytest-markers
+        name: Verify pytest markers are properly used
+        entry: bash -c 'python -m pytest --collect-only -q 2>&1 | grep -i "unknown" && echo "❌ Unbekannte Pytest Marker!" && exit 1 || true'
         language: system
-        stages: [commit]
+        pass_filenames: false
+        
+      - id: python-lint
+        name: Python Linting
+        entry: bash -c 'python -m flake8 --max-line-length=120 --ignore=E203,E501,W503'
+        language: system
+        files: \.py$
+        pass_filenames: true

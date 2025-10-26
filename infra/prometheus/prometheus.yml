@@ -1,0 +1,82 @@
+# TOM v3.0 - Prometheus Konfiguration
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'tom-v3'
+    environment: 'production'
+
+# Alertmanager-Konfiguration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - 'alertmanager:9093'
+
+# Alert Rules
+rule_files:
+  - '/etc/prometheus/alerts.yml'
+
+# Scrape Targets
+scrape_configs:
+  # Prometheus selbst
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Host Inventory (Textfile Collector)
+  - job_name: 'host-inventory'
+    file_sd_configs:
+      - files: ['/etc/prometheus/host-inventory.json']
+
+  # TOM Dispatcher
+  - job_name: 'tom-dispatcher'
+    static_configs:
+      - targets: ['dispatcher:8080']
+
+  # TOM Telephony Bridge
+  - job_name: 'tom-telephony'
+    static_configs:
+      - targets: ['telephony-bridge:8081']
+
+  # TOM STT Worker
+  - job_name: 'tom-stt'
+    static_configs:
+      - targets: ['stt-worker:8082']
+
+  # TOM LLM Worker
+  - job_name: 'tom-llm'
+    static_configs:
+      - targets: ['llm-worker:8083']
+
+  # TOM TTS Worker
+  - job_name: 'tom-tts'
+    static_configs:
+      - targets: ['tts-worker:8084']
+
+  # TOM Monitor
+  - job_name: 'tom-monitor'
+    static_configs:
+      - targets: ['monitor:8085']
+
+  # DCGM Exporter (GPU Metrics)
+  - job_name: 'dcgm'
+    static_configs:
+      - targets: ['dcgm-exporter:9400']
+
+  # Chroma Exporter (Embedding Metrics)
+  - job_name: 'chroma'
+    static_configs:
+      - targets: ['chroma-exporter:8086']
+
+  # Node Exporter
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # cAdvisor (Container Metrics)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
