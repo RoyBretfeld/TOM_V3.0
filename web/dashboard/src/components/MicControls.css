@@ -138,3 +138,13 @@
   background-color: #f8f9fa;
   color: #6c757d;
 }
+
+.error-message {
+  margin-top: 5px;
+  padding: 8px 12px;
+  background-color: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 4px;
+  color: #856404;
+  font-size: 12px;
+}

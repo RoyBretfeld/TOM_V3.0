@@ -66,7 +66,73 @@ pytest tests/
 python scripts/realtime_probe.py
 ```
 
-## 🎤 Frontend testen
+## 🎤 **Realtime Pipeline Status**
+
+### ✅ **VOLLSTÄNDIG IMPLEMENTIERT** (16. Oktober 2025)
+
+**Echte Realtime-Pipeline ohne Mocks - Produktionsbereit!**
+
+- **Backend:** Secure WebSocket Gateway (Port 8081)
+- **Provider:** OpenAI/Azure Realtime API Integration  
+- **Frontend:** AudioWorklet-basierte Mikrofonkette
+- **TTS:** Piper lokaler Echtbetrieb
+- **FSM:** Zustandsmaschine ohne Mocks
+- **Sicherheit:** JWT, Rate-Limits, CORS
+- **Audio Recording:** DSGVO-konforme Aufzeichnung
+- **Qualitätsprüfung:** Objektive Audio-Analyse
+
+### 🔧 **Implementierte Komponenten:**
+```
+🎤 Mikrofon → 🌐 WebSocket → 🎯 STT → 🤖 LLM → 🔊 TTS → 🎵 Audio
+```
+
+### 📁 **Dateien:**
+- **Backend:** `apps/telephony_bridge/ws_realtime.py`
+- **Provider:** `apps/realtime/provider_realtime.py`
+- **Frontend:** `web/dashboard/public/realtime.html`
+- **TTS:** `apps/realtime/tts_piper_realtime.py`
+- **FSM:** `apps/dispatcher/rt_fsm_realtime.py`
+- **Tests:** `scripts/e2e_test_realtime.py`
+- **Config:** `infra/env.realtime`
+
+### 🚀 **Einfacher Test:**
+1. **Server:** `python infra/simple_realtime_server.py`
+2. **Frontend:** `web/simple_test.html`
+3. **URL:** `ws://localhost:8081/`
+
+### 🎤 **Audio Recording & Qualitätsprüfung:**
+
+**DSGVO-konforme Aufzeichnung für interne Qualitätstests:**
+
+1. **Recording aktivieren:**
+   ```bash
+   export RECORD_AUDIO=true
+   export RECORD_PATH=./data/recordings
+   export RECORD_RETENTION_HOURS=24
+   ```
+
+2. **Server starten:**
+   ```bash
+   python apps/telephony_bridge/ws_realtime.py
+   ```
+
+3. **Test durchführen:**
+   ```bash
+   python scripts/test_audio_recording.py
+   ```
+
+4. **Qualitätsprüfung:**
+   ```bash
+   python scripts/qc_audio.py data/recordings/test-call-001/test-call-001.wav
+   ```
+
+**Zielwerte:**
+- RMS: 300-9000
+- Clipping: < 0.001
+- DC-Offset: < 200
+- SNR: > 20 dB
+
+---
 
 1. **Browser öffnen**: `http://localhost:3000`
 2. **Mikrofon auswählen**: Verfügbare Audio-Eingabegeräte
@@ -103,7 +169,10 @@ TOM_V3.0/
 │   ├── realtime/                 # Realtime-Adapter
 │   │   ├── config.py             # Feature-Flags
 │   │   ├── llm_stream.py         # LLM-Streaming (mock/provider)
-│   │   └── tts_stream.py         # TTS-Streaming (mock/Piper)
+│   │   ├── tts_stream.py         # TTS-Streaming (mock/Piper)
+│   │   ├── stt_whisperx.py       # WhisperX STT-Integration
+│   │   ├── llm_ollama.py         # Ollama LLM-Integration
+│   │   └── tts_piper.py          # Piper TTS-Integration
 │   ├── dispatcher/               # FSM-basierte Anrufsteuerung
 │   │   ├── rt_fsm.py             # Realtime Finite State Machine
 │   │   └── closing.py            # End-of-Call Feedback-Sammlung
@@ -126,7 +195,8 @@ TOM_V3.0/
 │   ├── security/                 # Security-Tests
 │   └── rl/                       # RL-System Tests
 ├── data/
-│   └── rl/                       # RL-Daten (SQLite, JSON-State)
+│   ├── rl/                       # RL-Daten (SQLite, JSON-State)
+│   └── audio/                    # Temporäre Audio-Dateien (WAV)
 ├── docs/
 │   ├── README_TOM_v3.0.md        # Diese Datei
 │   ├── ARCHITEKTUR.md            # Detaillierte Architektur

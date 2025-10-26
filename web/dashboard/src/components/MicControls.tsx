@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RealtimeWSClient } from '../lib/ws';
 import { floatToPCM16_16k, createAudioChunk, getAudioLevel } from '../lib/audio';
+import { audioPlayer } from '../lib/audioPlayer';
 import { AudioDevice, WSMessage } from '../types/events';
 import './MicControls.css';
 
@@ -12,11 +13,25 @@ interface MicControlsProps {
 const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
-  const [jwt, setJwt] = useState<string>('');
+  const [jwt, setJwt] = useState<string>('dev-no-jwt-needed');
   const [callId] = useState<string>(() => `call_${Date.now()}`);
   const [isConnected, setIsConnected] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
+  const [pipelineMode, setPipelineMode] = useState<'modular' | 'direct'>('modular');
+
+  const switchMode = async (mode: 'modular' | 'direct') => {
+    if (!wsClientRef.current) return;
+    
+    try {
+      await wsClientRef.current.send(JSON.stringify({
+        type: 'switch_mode',
+        mode: mode
+      }));
+      console.log(`Pipeline-Modus gewechselt zu: ${mode}`);
+    } catch (error) {
+      console.error('Fehler beim Wechseln des Modus:', error);
+    }
+  };
 
   const wsClientRef = useRef<RealtimeWSClient | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -26,18 +41,45 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
 
   // Geräte auflisten
   useEffect(() => {
-    navigator.mediaDevices.enumerateDevices().then(deviceList => {
-      const audioInputs = deviceList
-        .filter(device => device.kind === 'audioinput')
-        .map(device => ({
-          deviceId: device.deviceId,
-          label: device.label || `Mikrofon ${device.deviceId.slice(0, 8)}`
-        }));
-      setDevices(audioInputs);
-      if (audioInputs.length > 0) {
-        setSelectedDevice(audioInputs[0].deviceId);
+    const enumerateDevices = async () => {
+      try {
+        // Erst Mikrofon-Berechtigung anfordern
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        const deviceList = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = deviceList
+          .filter(device => device.kind === 'audioinput')
+          .map(device => ({
+            deviceId: device.deviceId,
+            label: device.label || `Mikrofon ${device.deviceId.slice(0, 8)}`
+          }));
+        
+        console.log('Audio-Geräte gefunden:', audioInputs);
+        setDevices(audioInputs);
+        
+        if (audioInputs.length > 0) {
+          setSelectedDevice(audioInputs[0].deviceId);
+        } else {
+          console.warn('Keine Audio-Eingabegeräte gefunden');
+          // Fallback: Default-Gerät
+          setDevices([{
+            deviceId: 'default',
+            label: 'Standard-Mikrofon'
+          }]);
+          setSelectedDevice('default');
+        }
+      } catch (error) {
+        console.error('Fehler beim Auflisten der Geräte:', error);
+        // Fallback: Default-Gerät
+        setDevices([{
+          deviceId: 'default',
+          label: 'Standard-Mikrofon (Berechtigung erforderlich)'
+        }]);
+        setSelectedDevice('default');
       }
-    });
+    };
+
+    enumerateDevices();
   }, []);
 
   // Audio-Level-Animation
@@ -50,18 +92,33 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
   };
 
   const connect = async () => {
-    if (!jwt.trim()) {
-      alert('Bitte JWT-Token eingeben');
-      return;
-    }
+    // JWT-Validierung für lokale Entwicklung deaktiviert
+    // if (!jwt.trim()) {
+    //   alert('Bitte JWT-Token eingeben');
+    //   return;
+    // }
 
     try {
-      const wsClient = new RealtimeWSClient(
-        callId,
-        jwt,
-        (message: WSMessage) => {
-          onEvent(message.type, message);
-        },
+        const wsClient = new RealtimeWSClient(
+          callId,
+          jwt,
+          (message: WSMessage) => {
+            onEvent(message.type, message);
+            
+            // Audio abspielen wenn TTS-Audio empfangen wird
+            if ((message.type === 'tts_audio' || message.type === 'direct_response') && (message.data || message.audio)) {
+              console.log('Spiele Audio ab...');
+              const audioData = message.data || message.audio;
+              if (audioData) {
+                audioPlayer.queueAudio(audioData);
+              }
+            }
+            
+            // Pipeline-Modus aktualisieren
+            if (message.type === 'mode_switched') {
+              setPipelineMode(message.mode);
+            }
+          },
         (error: string) => {
           onEvent('error', { error });
         },
@@ -109,13 +166,18 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: selectedDevice,
-          sampleRate: 48000,
-          channelCount: 1
-        }
-      });
+      const audioConstraints = selectedDevice === 'default' 
+        ? { audio: true }
+        : {
+            audio: {
+              deviceId: selectedDevice,
+              sampleRate: 48000,
+              channelCount: 1
+            }
+          };
+
+      console.log('Audio-Constraints:', audioConstraints);
+      const stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
 
       streamRef.current = stream;
 
@@ -189,16 +251,25 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
           onChange={(e) => setSelectedDevice(e.target.value)}
           disabled={isStreaming}
         >
-          {devices.map(device => (
-            <option key={device.deviceId} value={device.deviceId}>
-              {device.label}
-            </option>
-          ))}
+          {devices.length === 0 ? (
+            <option value="">Keine Geräte gefunden</option>
+          ) : (
+            devices.map(device => (
+              <option key={device.deviceId} value={device.deviceId}>
+                {device.label}
+              </option>
+            ))
+          )}
         </select>
+        {devices.length === 0 && (
+          <div className="error-message">
+            ⚠️ Keine Mikrofone gefunden. Bitte Browser-Berechtigung erteilen.
+          </div>
+        )}
       </div>
 
-      <div className="control-group">
-        <label htmlFor="jwt-input">JWT-Token:</label>
+      <div className="control-group" style={{display: 'none'}}>
+        <label htmlFor="jwt-input">JWT-Token (DEV-Modus deaktiviert):</label>
         <input
           id="jwt-input"
           type="password"
@@ -214,6 +285,26 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
         <span className="call-id">{callId}</span>
       </div>
 
+      <div className="control-group">
+        <label>Pipeline-Modus:</label>
+        <div className="mode-selector">
+          <button 
+            className={pipelineMode === 'modular' ? 'active' : ''}
+            onClick={() => switchMode('modular')}
+            disabled={!isConnected}
+          >
+            🔄 Modular (STT→LLM→TTS)
+          </button>
+          <button 
+            className={pipelineMode === 'direct' ? 'active' : ''}
+            onClick={() => switchMode('direct')}
+            disabled={!isConnected}
+          >
+            ⚡ Direct (Speech-to-Speech)
+          </button>
+        </div>
+      </div>
+
       <div className="audio-level">
         <label>Pegel:</label>
         <div className="level-bar">
@@ -227,7 +318,7 @@ const MicControls: React.FC<MicControlsProps> = ({ onConnect, onEvent }) => {
 
       <div className="button-group">
         {!isConnected ? (
-          <button onClick={connect} disabled={!jwt.trim()}>
+          <button onClick={connect} disabled={false}>
             Verbinden
           </button>
         ) : (

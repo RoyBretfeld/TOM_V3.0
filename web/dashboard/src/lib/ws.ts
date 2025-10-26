@@ -10,6 +10,10 @@ export interface WSMessage {
   text?: string;
   codec?: string;
   bytes?: string;
+  audio?: string;  // Für TTS-Audio
+  timestamp?: string;
+  provider?: string;
+  confidence?: number;
 }
 
 export class RealtimeWSClient {
@@ -40,7 +44,7 @@ export class RealtimeWSClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        const wsUrl = `ws://localhost:8080/ws/stream/${this.callId}?t=${this.jwt}`;
+        const wsUrl = `ws://localhost:8080/`;
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
