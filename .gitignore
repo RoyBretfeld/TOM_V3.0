@@ -8,11 +8,17 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 .env
 
-# Models
+# Models & Audio
 models/*/
 !models/*/.gitkeep
+data/audio/
+data/models/
+!data/models/.gitkeep
+!data/models/ollama/
+!data/models/piper/.gitkeep
 
 # Logs
 logs/*
@@ -21,6 +27,25 @@ logs/*
 # Runtime Data
 data/runtime/*
 !data/runtime/.gitkeep
+
+# Tests
+.pytest_cache/
+test-results/
+coverage.xml
+.coverage
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+dist/
+build/
+
+# Archives
+*.zip
+*.7z
+*.tar.gz
+zip/
 
 # IDE
 .vscode/

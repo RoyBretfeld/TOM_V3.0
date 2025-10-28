@@ -1,33 +1,52 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 
-  TOM v3.0 - FreeSWITCH Dialplan für Audio Fork
-  WSS-Fork zu TOM Gateway mit PCM16 Streaming
+<!--
+  TOM v3.0 – FreeSWITCH Dialplan (Inbound/Outbound) für Realtime Audio Fork
+  Anforderungen:
+    * TLS/SRTP auf dem Trunk (siehe vars.xml / sofia profile)
+    * DSGVO: Consent vor Duplex-Start, keine PII in Logs
+    * audio_fork → WS-Gateway (JWT TTL ≤ 60s, Redis Nonce, Allowlist)
 -->
 <include>
-  <extension name="tom_audio_fork">
-    <condition field="destination_number" expression="^(\d+)$">
-      <!-- Call-ID aus UUID extrahieren -->
-      <action application="set" data="call_id=${uuid}"/>
-      
-      <!-- TOD-Metadata -->
-      <action application="set" data="tod_url=wss://tom.local:7443/ws/stream?call_id=${call_id}"/>
-      <action application="set" data="tod_host=tom.local"/>
-      <action application="set" data="tod_port=7443"/>
-      <action application="set" data="tod_format=PCM16"/>
-      <action application="set" data="tod_codec=PCMU"/>
-      
-      <!-- Audio Fork aktivieren -->
-      <action application="answer"/>
-      
-      <!-- WebSocket Audio Fork (bidirektional) -->
-      <action application="tone_detect" data="audio_fork wss://tom.local:7443/ws/stream?call_id=${call_id}"/>
-      
-      <!-- Park Session (für Rückkanal) -->
-      <action application="park"/>
-      
-      <!-- Fallback für Timeout -->
-      <action application="hangup" data="NORMAL_CLEARING"/>
-    </condition>
-  </extension>
+  <context name="tom_inbound">
+    <extension name="tom_consent_and_fork">
+      <condition field="destination_number" expression="^(\+49\d+|\+43\d+|\+41\d+)$">
+        <!-- Call-ID sowie Original-CLI sichern -->
+        <action application="set" data="call_id=${uuid}"/>
+        <action application="set" data="original_cli=${caller_id_number}"/>
+
+        <!-- DSGVO Consent: Opt-In vor Duplex -->
+        <action application="answer"/>
+        <action application="playback" data="ivr/consent_recording.wav"/>
+
+        <!-- Telefonnummer für Logs/Metriken hashen (Lua/Perl Skript liefert SHA256) -->
+        <action application="set" data="cli_hash=${lua(hash_cli.lua ${original_cli})}"/>
+        <action application="log" data="INFO [TOM] inbound call consented cli_hash=${cli_hash}"/>
+
+        <!-- JWT Token mit TTL ≤ 60s abholen -->
+        <action application="set" data="ws_jwt=${curl(https://tom.local.internal/token?scope=rt_audio&call_id=${call_id})}"/>
+        <action application="set" data="ws_url=wss://tom.local:7443/ws/stream?call_id=${call_id}&token=${ws_jwt}"/>
+
+        <!-- Duplex Audio Fork (PCM16 16k Mono) -->
+        <action application="audio_fork" data="${ws_url};capture-format=PCM16;mix=mono;sample-rate=16000;channels=1"/>
+
+        <!-- Session parken, Rückkanal kommt über Gateway -->
+        <action application="park"/>
+      </condition>
+    </extension>
+  </context>
+  <context name="tom_outbound">
+    <extension name="tom_allowed_destinations">
+      <condition field="destination_number" expression="^(\+49|\+43|\+41)[0-9]+$">
+        <action application="export" data="effective_caller_id_number=${account_did}"/>
+        <action application="bridge" data="sofia/gateway/provider/${destination_number}"/>
+      </condition>
+    </extension>
+    <extension name="tom_blocked_destinations">
+      <condition field="destination_number" expression=".*">
+        <action application="log" data="WARNING [TOM] blocked outbound attempt for ${destination_number}"/>
+        <action application="respond" data="603 Decline"/>
+      </condition>
+    </extension>
+  </context>
 </include>
 

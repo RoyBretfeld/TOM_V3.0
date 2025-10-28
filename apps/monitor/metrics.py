@@ -179,6 +179,46 @@ tom_telephony_barge_in_latency_seconds = Histogram(
     registry=rl_registry
 )
 
+tom_ws_gateway_http_responses_total = Counter(
+    'tom_ws_gateway_http_responses_total',
+    'HTTP response codes during WebSocket handshake',
+    ['code'],
+    registry=rl_registry
+)
+
+tom_ws_gateway_rate_limit_total = Counter(
+    'tom_ws_gateway_rate_limit_total',
+    'Rate limit hits on the WebSocket gateway',
+    ['type'],
+    registry=rl_registry
+)
+
+tom_calls_active = Gauge(
+    'tom_calls_active',
+    'Active realtime call sessions',
+    registry=rl_registry
+)
+
+tom_ivr_consent_given_total = Counter(
+    'tom_ivr_consent_given_total',
+    'Number of callers who gave consent for recording',
+    ['skill'],
+    registry=rl_registry
+)
+
+tom_cli_rewrite_total = Counter(
+    'tom_cli_rewrite_total',
+    'Total number of CLI hashes generated',
+    registry=rl_registry
+)
+
+tom_blocked_dial_attempts_total = Counter(
+    'tom_blocked_dial_attempts_total',
+    'Blocked outbound dial attempts',
+    ['reason'],
+    registry=rl_registry
+)
+
 # Error-Metriken
 tom_errors_total = Counter(
     'tom_errors_total',
@@ -231,6 +271,12 @@ class Metrics:
         self.tom_realtime_backend = tom_realtime_backend
         self.tom_provider_failover_total = tom_provider_failover_total
         self.tom_realtime_e2e_ms = tom_realtime_e2e_ms
+        self.tom_ws_gateway_http_responses_total = tom_ws_gateway_http_responses_total
+        self.tom_ws_gateway_rate_limit_total = tom_ws_gateway_rate_limit_total
+        self.tom_calls_active = tom_calls_active
+        self.tom_ivr_consent_given_total = tom_ivr_consent_given_total
+        self.tom_cli_rewrite_total = tom_cli_rewrite_total
+        self.tom_blocked_dial_attempts_total = tom_blocked_dial_attempts_total
 
 
 # Globale Metriken-Instanz

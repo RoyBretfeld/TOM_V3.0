@@ -14,6 +14,10 @@ jobs:
       - name: Setup Node (optional)
         uses: actions/setup-node@v4
         with: { node-version: '20' }
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev
       - name: Install Python deps (if exists)
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi

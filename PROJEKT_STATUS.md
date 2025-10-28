@@ -81,9 +81,9 @@
 ### 📋 **Nächste Schritte:**
 
 1. **Provider-API-Keys konfigurieren** (`infra/env.realtime`)
-2. **Produktions-Deployment** vorbereiten
-3. **Performance-Tuning** basierend auf E2E-Tests
-4. **Monitoring-Dashboard** erweitern
+2. **Cloud-Bereinigung**: `.venv/`, `infra/venv/`, `node_modules/`, Modelle & Logs von G:\ entfernen (nur Code + Doku behalten)
+3. **GoogleDrive Sync-Skripte nutzen** (`sync/sync_to_cloud.bat`, `sync/sync_from_cloud.bat`) – Excludes prüfen (keine Modelle/Logs)
+4. **Arbeits-PC Setup** nach `WORK_SETUP.md` durchführen (Git-Clone oder robocopy, `.venv` lokal bauen)
 
 ---
 

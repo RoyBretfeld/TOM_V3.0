@@ -30,10 +30,10 @@ echo.
 
 REM Robocopy mit Excludes
 robocopy "%SOURCE%" "%DEST%" /E ^
-    /XD .venv node_modules __pycache__ .pytest_cache ^
-          data\audio data\models\whisperx logs zip MagicMock ^
-    /XF *.pyc *.pyo *.log *.zip *.7z ^
-    /XD apps\__pycache__ apps\realtime\__pycache__ ^
+    /XD .venv infra\venv node_modules web\dashboard\node_modules ^
+        __pycache__ .pytest_cache tests\__pycache__ apps\__pycache__ apps\realtime\__pycache__ ^
+        data\audio data\models data\runtime logs zip MagicMock ^
+    /XF *.pyc *.pyo *.log *.zip *.7z *.onnx *.pt *.bin *.gguf ^
     /R:3 /W:5 /MT:4 ^
     /NFL /NDL /NP
 
