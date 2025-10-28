@@ -1,48 +1,88 @@
 # TOM v3.0 - Prometheus Alert Rules
 
 groups:
-  - name: tom_pipeline_latency
-    interval: 10m
+  - name: tom_realtime
+    interval: 5m
     rules:
       - alert: HighE2ELatency
-        expr: histogram_quantile(0.95, tom_pipeline_e2e_latency_seconds) > 0.8
-        for: 10m
+        expr: histogram_quantile(0.95, sum(rate(tom_realtime_e2e_ms_bucket[5m])) by (le)) > 800
+        for: 5m
         labels:
-          severity: warning
-          component: pipeline
+          severity: critical
+          component: realtime
         annotations:
-          summary: "High E2E Latency (p95 > 800ms)"
-          description: "E2E Pipeline Latenz übersteigt 800ms (p95)"
+          summary: "Realtime E2E latency high (p95 > 800 ms)"
+          description: "Die Echtzeit-Ende-zu-Ende-Latenz überschreitet 800 ms (p95)."
 
-      - alert: HighSTTLatency
-        expr: histogram_quantile(0.95, tom_stt_latency_seconds) > 0.3
+      - alert: HighStageLatencySTT
+        expr: histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage="stt"}[5m])) by (le)) > 300
         for: 5m
         labels:
           severity: warning
           component: stt
         annotations:
-          summary: "High STT Latency (p95 > 300ms)"
-          description: "STT Latenz übersteigt 300ms (p95)"
+          summary: "STT latency high (p95 > 300 ms)"
+          description: "STT Stufe überschreitet 300 ms (p95)."
 
-      - alert: HighLLMLatency
-        expr: histogram_quantile(0.95, tom_llm_latency_seconds) > 0.5
+      - alert: HighStageLatencyLLM
+        expr: histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage="llm"}[5m])) by (le)) > 500
         for: 5m
         labels:
           severity: warning
           component: llm
         annotations:
-          summary: "High LLM Latency (p95 > 500ms)"
-          description: "LLM Latenz übersteigt 500ms (p95)"
+          summary: "LLM latency high (p95 > 500 ms)"
+          description: "LLM Stufe überschreitet 500 ms (p95)."
 
-      - alert: HighTTSLatency
-        expr: histogram_quantile(0.95, tom_tts_latency_seconds) > 0.2
+      - alert: HighStageLatencyTTS
+        expr: histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage="tts"}[5m])) by (le)) > 200
         for: 5m
         labels:
           severity: warning
           component: tts
         annotations:
-          summary: "High TTS Latency (p95 > 200ms)"
-          description: "TTS Latenz übersteigt 200ms (p95)"
+          summary: "TTS latency high (p95 > 200 ms)"
+          description: "TTS Stufe überschreitet 200 ms (p95)."
+
+      - alert: GatewayBackpressure
+        expr: increase(tom_ws_backpressure_events_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Backpressure detected"
+          description: "Das Gateway meldet Backpressure-Ereignisse."
+
+      - alert: Gateway429Ratio
+        expr: sum(rate(tom_ws_gateway_http_responses_total{code="429"}[10m])) / sum(rate(tom_ws_gateway_http_responses_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "429 quota above 5%"
+          description: "Mehr als 5% der Gateway-Antworten sind 429 (Rate Limit)."
+
+      - alert: AudioDropRateHigh
+        expr: (increase(tom_audio_frames_dropped_total[5m]) / clamp_min(increase(tom_audio_frames_sent_total[5m]), 1)) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Audio drop ratio above 1%"
+          description: "Mehr als 1% der Audio-Frames wurden verworfen."
+
+      - alert: SyntheticCallStale
+        expr: time() - tom_synth_call_last_success_timestamp_seconds > 93600
+        for: 5m
+        labels:
+          severity: warning
+          component: synthetic
+        annotations:
+          summary: "Synthetic call missing (> 26h)"
+          description: "Der letzte erfolgreiche Synthetic Call liegt länger als 26 Stunden zurück."
 
   - name: tom_gpu_usage
     interval: 5m
@@ -66,19 +106,6 @@ groups:
         annotations:
           summary: "High GPU Utilization (> 95%)"
           description: "GPU Utilization konstant über 95%"
-
-  - name: tom_backpressure
-    interval: 5m
-    rules:
-      - alert: BackpressureDetected
-        expr: tom_pipeline_backpressure_total > 0
-        for: 1m
-        labels:
-          severity: warning
-          component: pipeline
-        annotations:
-          summary: "Backpressure detected"
-          description: "Pipeline hat Backpressure (Blockierung)"
 
   - name: tom_rl_system
     interval: 10m
@@ -140,7 +167,7 @@ groups:
           description: "Telefonie Failure Rate übersteigt 10%"
 
       - alert: HighBargeInLatency
-        expr: histogram_quantile(0.95, tom_telephony_barge_in_latency_seconds) > 0.12
+        expr: histogram_quantile(0.95, sum(rate(tom_telephony_barge_in_latency_seconds_bucket[5m])) by (le)) > 0.12
         for: 5m
         labels:
           severity: warning
@@ -153,7 +180,7 @@ groups:
     interval: 5m
     rules:
       - alert: HighToolLatency
-        expr: histogram_quantile(0.95, tom_tool_latency_ms{tool=~"autoteilepilot|pdf_catalog|chromadb"}) > 2000
+        expr: histogram_quantile(0.95, sum(rate(tom_tool_latency_ms_bucket{tool=~"autoteilepilot|pdf_catalog|chromadb"}[5m])) by (tool, le)) > 2000
         for: 5m
         labels:
           severity: warning

@@ -7,6 +7,7 @@ Type=oneshot
 User=tom
 WorkingDirectory=/opt/tom
 Environment="PATH=/opt/tom/venv/bin"
+EnvironmentFile=-/opt/tom/.env
 ExecStart=/opt/tom/venv/bin/python -m scripts.synthetic_call --run-id nightly
 StandardOutput=journal
 StandardError=journal

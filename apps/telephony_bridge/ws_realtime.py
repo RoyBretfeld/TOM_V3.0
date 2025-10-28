@@ -25,7 +25,7 @@ from websockets.server import WebSocketServerProtocol
 
 # Lokale Imports
 from apps.dispatcher.rt_fsm import RealtimeFSM
-from apps.monitor.metrics import metrics
+from apps.monitor.metrics import metrics, start_metrics_server
 from apps.realtime.provider_realtime import RealtimeProvider
 from apps.realtime.tts_piper import PiperTTSRealtime
 from apps.security.phone_hash import PhoneHashConfigError, hash_phone_number, mask_number
@@ -417,6 +417,8 @@ class Session:
         self.fsm_state = "LISTENING"
         self.audio_buffer = []
         self.last_audio_time = 0
+        self.start_time = time.time()
+        self.e2e_recorded = False
         
     async def open_provider_session(self):
         """Provider-Session öffnen"""
@@ -455,7 +457,8 @@ class Session:
             self.audio_buffer.append(event.timestamp)
             if len(self.audio_buffer) > MAX_AUDIO_BUFFER_SIZE:
                 self.audio_buffer.pop(0)
-                self.gateway.metrics.tom_pipeline_backpressure_total.inc()
+                self.gateway.metrics.tom_ws_backpressure_events_total.inc()
+                self.gateway.metrics.tom_audio_frames_dropped_total.inc()
                 logger.debug(f"Backpressure triggered for call {self.call_id} (buffer>{MAX_AUDIO_BUFFER_SIZE})")
 
             if self.last_audio_time:
@@ -466,6 +469,7 @@ class Session:
             
             # An Provider senden
             await self.provider_session.send_audio(audio_bytes, event.timestamp)
+            self.gateway.metrics.tom_audio_frames_sent_total.inc()
             
             # FSM-Update
             await self.gateway.fsm.process_audio_chunk(self.call_id, event)
@@ -514,22 +518,60 @@ class Session:
         """Provider-Events lesen und weiterleiten"""
         if not self.provider_session:
             return
-            
+
         try:
             async for event in self.provider_session.recv():
+                event_type = event.get('type')
+                self._observe_stage_latency(event)
+                self._maybe_record_e2e_latency(event)
                 # Event an Client weiterleiten
                 await self.websocket.send(json.dumps(event))
-                
+
                 # FSM-Update basierend auf Event-Typ
-                if event.get('type') == 'stt_final':
+                if event_type == 'stt_final':
                     await self.gateway.fsm.process_stt_final(self.call_id, event)
-                elif event.get('type') == 'llm_token':
+                elif event_type == 'llm_token':
                     await self.gateway.fsm.process_llm_token(self.call_id, event)
-                elif event.get('type') == 'tts_audio':
+                elif event_type == 'tts_audio':
                     await self.gateway.fsm.process_tts_audio(self.call_id, event)
-                
+
         except Exception as e:
             logger.error(f"Provider event processing error: {e}")
+
+    def _observe_stage_latency(self, event: dict) -> None:
+        stage_map = {
+            'stt_partial': 'stt',
+            'stt_final': 'stt',
+            'llm_token': 'llm',
+            'tts_audio': 'tts',
+        }
+        event_type = event.get('type')
+        stage = stage_map.get(event_type)
+        if not stage:
+            return
+        latency = event.get('latency_ms') or event.get('duration_ms')
+        if latency is None:
+            return
+        try:
+            latency = float(latency)
+        except (TypeError, ValueError):
+            return
+        self.gateway.metrics.tom_stage_latency_ms.labels(stage=stage).observe(latency)
+
+    def _maybe_record_e2e_latency(self, event: dict) -> None:
+        if self.e2e_recorded:
+            return
+        if event.get('type') != 'tts_audio':
+            return
+        latency = event.get('e2e_latency_ms')
+        if latency is None:
+            latency = (time.time() - self.start_time) * 1000.0
+        try:
+            latency = float(latency)
+        except (TypeError, ValueError):
+            return
+        self.gateway.metrics.tom_realtime_e2e_ms.observe(latency)
+        self.e2e_recorded = True
     
     async def close(self):
         """Session schließen"""
@@ -547,6 +589,14 @@ class Session:
 
 async def main():
     """Hauptfunktion"""
+    METRICS_HOST = os.getenv('METRICS_HOST', '0.0.0.0')
+    METRICS_PORT = int(os.getenv('METRICS_PORT', '9100'))
+    METRICS_ADMIN_TOKEN = os.getenv('METRICS_ADMIN_TOKEN')
+    start_metrics_server(
+        host=METRICS_HOST,
+        port=METRICS_PORT,
+        admin_token=METRICS_ADMIN_TOKEN,
+    )
     gateway = RealtimeWSGateway()
     
     logger.info('Starting TOM v3.0 Realtime WebSocket Gateway...')

@@ -40,6 +40,11 @@ scrape_configs:
     static_configs:
       - targets: ['telephony-bridge:8081']
 
+  # TOM Gateway Metrics (/metrics)
+  - job_name: 'tom-gateway'
+    static_configs:
+      - targets: ['telephony-bridge:9100']
+
   # TOM STT Worker
   - job_name: 'tom-stt'
     static_configs:

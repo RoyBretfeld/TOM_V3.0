@@ -11,7 +11,7 @@
         "type": "stat",
         "targets": [
           {
-            "expr": "tom_telephony_active_calls_total"
+            "expr": "sum(tom_calls_active)"
           }
         ],
         "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
@@ -34,31 +34,35 @@
       },
       {
         "id": 3,
-        "title": "Pipeline Latency - E2E",
+        "title": "Realtime Latency - E2E",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, tom_pipeline_e2e_latency_seconds)",
+            "expr": "histogram_quantile(0.95, sum(rate(tom_realtime_e2e_ms_bucket[5m])) by (le))",
             "legendFormat": "E2E p95"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(tom_realtime_e2e_ms_bucket[5m])) by (le))",
+            "legendFormat": "E2E p50"
           }
         ],
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
       },
       {
         "id": 4,
-        "title": "Pipeline Latency - Components",
+        "title": "Realtime Latency - Stages",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, tom_stt_latency_seconds)",
+            "expr": "histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage=\"stt\"}[5m])) by (le))",
             "legendFormat": "STT"
           },
           {
-            "expr": "histogram_quantile(0.95, tom_llm_latency_seconds)",
+            "expr": "histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage=\"llm\"}[5m])) by (le))",
             "legendFormat": "LLM"
           },
           {
-            "expr": "histogram_quantile(0.95, tom_tts_latency_seconds)",
+            "expr": "histogram_quantile(0.95, sum(rate(tom_stage_latency_ms_bucket{stage=\"tts\"}[5m])) by (le))",
             "legendFormat": "TTS"
           }
         ],
@@ -124,6 +128,39 @@
       },
       {
         "id": 10,
+        "title": "429 Ratio (5m)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(tom_ws_gateway_http_responses_total{code=\"429\"}[5m])) / sum(rate(tom_ws_gateway_http_responses_total[5m])) * 100"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28}
+      },
+      {
+        "id": 11,
+        "title": "Audio Drop % (5m)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "(increase(tom_audio_frames_dropped_total[5m]) / clamp_min(increase(tom_audio_frames_sent_total[5m]), 1)) * 100"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28}
+      },
+      {
+        "id": 12,
+        "title": "Minutes since Synthetic",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "(time() - tom_synth_call_last_success_timestamp_seconds) / 60"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 28}
+      },
+      {
+        "id": 13,
         "title": "ToolHub - Quellenmix",
         "type": "bargraph",
         "targets": [
@@ -132,22 +169,22 @@
             "legendFormat": "{{source}}"
           }
         ],
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28}
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36}
       },
       {
-        "id": 11,
+        "id": 14,
         "title": "ToolHub - Source Latency",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, tom_tool_latency_ms{source=~\"autoteilepilot|pdf_catalog|chromadb\"})",
+            "expr": "histogram_quantile(0.95, sum(rate(tom_tool_latency_ms_bucket{source=~\"autoteilepilot|pdf_catalog|chromadb\"}[5m])) by (source, le))",
             "legendFormat": "{{source}} p95"
           }
         ],
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28}
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36}
       },
       {
-        "id": 12,
+        "id": 15,
         "title": "Errors by Component",
         "type": "table",
         "targets": [
@@ -156,7 +193,7 @@
             "legendFormat": "{{component}}"
           }
         ],
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36}
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 44}
       }
     ],
     "annotations": {

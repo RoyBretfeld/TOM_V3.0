@@ -139,7 +139,7 @@ wait
 **Wichtige Metriken**:
 - `tom_realtime_e2e_ms{backend="provider"}` → p95 < 800ms
 - `tom_realtime_backend` → provider=1, local=0
-- `tom_pipeline_backpressure_total` → sollte 0 bleiben
+- `tom_ws_backpressure_events_total` → sollte 0 bleiben
 - `tom_provider_failover_total` → sollte 0 bleiben
 
 ### 4.3 Failover-Szenario

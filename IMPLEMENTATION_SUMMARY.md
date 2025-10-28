@@ -92,12 +92,15 @@ Alle in der Gap-Analyse identifizierten Lücken wurden systematisch implementier
 - `tom_tool_latency_ms{tool,source}`
 - `tom_tool_calls_failed_total{tool,source}`
 
-**Pipeline:**
-- `tom_pipeline_e2e_latency_seconds`
-- `tom_stt_latency_seconds`
-- `tom_llm_latency_seconds`
-- `tom_tts_latency_seconds`
-- `tom_pipeline_backpressure_total`
+**Realtime:**
+- `tom_calls_active`
+- `tom_realtime_e2e_ms`
+- `tom_stage_latency_ms{stage}`
+- `tom_ws_gateway_http_responses_total{code}`
+- `tom_audio_frames_sent_total`
+- `tom_audio_frames_dropped_total`
+- `tom_ws_backpressure_events_total`
+- `tom_synth_call_last_success_timestamp_seconds`
 
 **Telefonie:**
 - `tom_telephony_active_calls_total`
@@ -109,15 +112,14 @@ Alle in der Gap-Analyse identifizierten Lücken wurden systematisch implementier
 **Errors:**
 - `tom_errors_total{component}`
 
-### Alert Rules (8 Gruppen)
+### Alert Rules (6 Gruppen)
 
-1. **tom_pipeline_latency**: E2E > 800ms, STT > 300ms, LLM > 500ms, TTS > 200ms
-2. **tom_gpu_usage**: GPU Memory > 90%, GPU Utilization > 95%
-3. **tom_backpressure**: Backpressure > 0
-4. **tom_rl_system**: RL Reward < -0.2, Blacklisted Variants > 2, Low Exploration < 5%
-5. **tom_service_availability**: Service Down
-6. **tom_telephony**: Call Failure Rate > 10%, Barge-In Latency > 120ms
-7. **tom_toolhub**: Tool Latency > 2s, Tool Call Failure Rate > 5%
+1. **tom_realtime**: E2E (p95) > 800 ms, Stage-Latenzen (STT/LLM/TTS), Backpressure, 429-Quote > 5 %, Audio-Drop-Rate > 1 %, Synthetic > 26 h alt
+2. **tom_gpu_usage**: GPU Memory > 90 %, GPU Utilization > 95 %
+3. **tom_rl_system**: RL Reward < -0.2, Blacklisted Variants > 2, Low Exploration < 5 %
+4. **tom_service_availability**: Service Down
+5. **tom_telephony**: Call Failure Rate > 10 %, Barge-In Latency > 120 ms
+6. **tom_toolhub**: Tool-Latenz > 2 s, Tool-Call-Failure > 5 %
 
 ### Monitoring-Stack
 

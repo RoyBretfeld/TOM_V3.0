@@ -1,17 +1,37 @@
 """
-TOM v3.0 - RL Metrics Exporter
-Prometheus-Metriken für Reinforcement Learning System
+TOM v3.0 - Prometheus Metrics Exporter
+Erweitert um Gateway/Realtime Kennzahlen
 """
 
-from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry, generate_latest
-import logging
-from typing import Dict, Any, Optional
 from datetime import datetime
+import logging
+import socketserver
+import threading
+import time
+from typing import Any, Dict, Optional
+from wsgiref.simple_server import WSGIServer, make_server
+
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+    make_wsgi_app,
+)
 
 logger = logging.getLogger(__name__)
 
-# Registry für RL-Metriken
+# Eigene Registry, damit wir mehrere Apps parallel fahren können
 rl_registry = CollectorRegistry()
+
+# Basis-Metriken -------------------------------------------------------------
+
+tom_calls_active = Gauge(
+    "tom_calls_active",
+    "Number of active realtime call sessions",
+    registry=rl_registry,
+)
 
 # RL-spezifische Metriken
 rl_feedback_total = Counter(
@@ -114,38 +134,7 @@ tom_tool_calls_failed_total = Counter(
     registry=rl_registry
 )
 
-# Pipeline-Metriken
-tom_pipeline_e2e_latency_seconds = Histogram(
-    'tom_pipeline_e2e_latency_seconds',
-    'End-to-end pipeline latency',
-    ['call_id_hash'],
-    buckets=[0.1, 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0],
-    registry=rl_registry
-)
-
-tom_stt_latency_seconds = Histogram(
-    'tom_stt_latency_seconds',
-    'STT processing latency',
-    registry=rl_registry
-)
-
-tom_llm_latency_seconds = Histogram(
-    'tom_llm_latency_seconds',
-    'LLM processing latency',
-    registry=rl_registry
-)
-
-tom_tts_latency_seconds = Histogram(
-    'tom_tts_latency_seconds',
-    'TTS processing latency',
-    registry=rl_registry
-)
-
-tom_pipeline_backpressure_total = Counter(
-    'tom_pipeline_backpressure_total',
-    'Pipeline backpressure events',
-    registry=rl_registry
-)
+# Pipeline-Metriken (alt) wurden entfernt und durch Realtime-spezifische Kennzahlen ersetzt
 
 # Telefonie-Metriken
 tom_telephony_active_calls_total = Gauge(
@@ -181,9 +170,9 @@ tom_telephony_barge_in_latency_seconds = Histogram(
 
 tom_ws_gateway_http_responses_total = Counter(
     'tom_ws_gateway_http_responses_total',
-    'HTTP response codes during WebSocket handshake',
+    'HTTP response codes served by the realtime gateway',
     ['code'],
-    registry=rl_registry
+    registry=rl_registry,
 )
 
 tom_ws_gateway_rate_limit_total = Counter(
@@ -193,10 +182,28 @@ tom_ws_gateway_rate_limit_total = Counter(
     registry=rl_registry
 )
 
-tom_calls_active = Gauge(
-    'tom_calls_active',
-    'Active realtime call sessions',
-    registry=rl_registry
+tom_audio_frames_sent_total = Counter(
+    'tom_audio_frames_sent_total',
+    'Audio frames forwarded to the realtime backend',
+    registry=rl_registry,
+)
+
+tom_audio_frames_dropped_total = Counter(
+    'tom_audio_frames_dropped_total',
+    'Audio frames dropped due to backpressure',
+    registry=rl_registry,
+)
+
+tom_ws_backpressure_events_total = Counter(
+    'tom_ws_backpressure_events_total',
+    'Total number of backpressure events in the gateway',
+    registry=rl_registry,
+)
+
+tom_synth_call_last_success_timestamp_seconds = Gauge(
+    'tom_synth_call_last_success_timestamp_seconds',
+    'Unix timestamp of the last successful synthetic call',
+    registry=rl_registry,
 )
 
 tom_ivr_consent_given_total = Counter(
@@ -243,10 +250,17 @@ tom_provider_failover_total = Counter(
 
 tom_realtime_e2e_ms = Histogram(
     'tom_realtime_e2e_ms',
-    'Realtime E2E latency in milliseconds',
-    ['backend'],
-    buckets=[100, 200, 300, 400, 500, 600, 700, 800, 1000, 1500],
-    registry=rl_registry
+    'Realtime end-to-end latency in milliseconds',
+    buckets=[50, 100, 150, 200, 300, 500, 800, 1200, 2000],
+    registry=rl_registry,
+)
+
+tom_stage_latency_ms = Histogram(
+    'tom_stage_latency_ms',
+    'Stage latency (ms) per component',
+    ['stage'],
+    buckets=[10, 20, 40, 80, 120, 200, 300, 500],
+    registry=rl_registry,
 )
 
 # Globale Metriken-Instanz für einfachen Zugriff
@@ -254,14 +268,20 @@ class Metrics:
     """Zentrale Metriken-Klasse"""
     
     def __init__(self):
+        self.tom_calls_active = tom_calls_active
+        self.tom_realtime_e2e_ms = tom_realtime_e2e_ms
+        self.tom_stage_latency_ms = tom_stage_latency_ms
+        self.tom_ws_gateway_http_responses_total = tom_ws_gateway_http_responses_total
+        self.tom_audio_frames_sent_total = tom_audio_frames_sent_total
+        self.tom_audio_frames_dropped_total = tom_audio_frames_dropped_total
+        self.tom_ws_backpressure_events_total = tom_ws_backpressure_events_total
+        self.tom_synth_call_last_success_timestamp_seconds = (
+            tom_synth_call_last_success_timestamp_seconds
+        )
+        self.tom_ws_gateway_rate_limit_total = tom_ws_gateway_rate_limit_total
         self.tom_tool_calls_total = tom_tool_calls_total
         self.tom_tool_latency_ms = tom_tool_latency_ms
         self.tom_tool_calls_failed_total = tom_tool_calls_failed_total
-        self.tom_pipeline_e2e_latency_seconds = tom_pipeline_e2e_latency_seconds
-        self.tom_stt_latency_seconds = tom_stt_latency_seconds
-        self.tom_llm_latency_seconds = tom_llm_latency_seconds
-        self.tom_tts_latency_seconds = tom_tts_latency_seconds
-        self.tom_pipeline_backpressure_total = tom_pipeline_backpressure_total
         self.tom_telephony_active_calls_total = tom_telephony_active_calls_total
         self.tom_telephony_calls_total = tom_telephony_calls_total
         self.tom_telephony_calls_failed_total = tom_telephony_calls_failed_total
@@ -270,10 +290,6 @@ class Metrics:
         self.tom_errors_total = tom_errors_total
         self.tom_realtime_backend = tom_realtime_backend
         self.tom_provider_failover_total = tom_provider_failover_total
-        self.tom_realtime_e2e_ms = tom_realtime_e2e_ms
-        self.tom_ws_gateway_http_responses_total = tom_ws_gateway_http_responses_total
-        self.tom_ws_gateway_rate_limit_total = tom_ws_gateway_rate_limit_total
-        self.tom_calls_active = tom_calls_active
         self.tom_ivr_consent_given_total = tom_ivr_consent_given_total
         self.tom_cli_rewrite_total = tom_cli_rewrite_total
         self.tom_blocked_dial_attempts_total = tom_blocked_dial_attempts_total
@@ -416,3 +432,49 @@ def get_metrics() -> str:
 def get_metrics_dict() -> Dict[str, Any]:
     """Gibt Metriken als Dictionary zurück"""
     return _get_metrics_exporter().get_metrics_dict()
+
+
+class MetricsWSGIApp:
+    """Einfache WSGI-App für /metrics und Admin-Endpunkte."""
+
+    def __init__(self, admin_token: Optional[str] = None):
+        self._prom_app = make_wsgi_app(rl_registry)
+        self._admin_token = admin_token
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        method = environ.get("REQUEST_METHOD", "GET").upper()
+
+        if path == "/metrics":
+            return self._prom_app(environ, start_response)
+
+        if path == "/metrics/synth" and method in {"POST", "PUT"}:
+            if self._admin_token:
+                auth = environ.get("HTTP_AUTHORIZATION", "")
+                if not auth.lower().startswith("bearer ") or auth.split(" ", 1)[1] != self._admin_token:
+                    start_response("401 Unauthorized", [("Content-Type", "text/plain")])
+                    return [b"unauthorized"]
+            metrics.set_synthetic_success()
+            start_response("204 No Content", [])
+            return [b""]
+
+        start_response("404 Not Found", [("Content-Type", "text/plain")])
+        return [b"not found"]
+
+
+class ThreadedWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+
+
+def start_metrics_server(host: str = "0.0.0.0", port: int = 9100, admin_token: Optional[str] = None) -> None:
+    """Startet den Prometheus-Metrik-Server in einem Hintergrundthread."""
+
+    app = MetricsWSGIApp(admin_token=admin_token)
+
+    def _run() -> None:
+        with make_server(host, port, app, ThreadedWSGIServer) as httpd:
+            logger.info("Metrics server running on http://%s:%s/metrics", host, port)
+            httpd.serve_forever()
+
+    thread = threading.Thread(target=_run, name="metrics-server", daemon=True)
+    thread.start()
