@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOM v3.0 - Einfach Sprechen</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            text-align: center;
+        }
+        h1 { margin-bottom: 30px; }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .connected { background: rgba(76, 175, 80, 0.3); }
+        .disconnected { background: rgba(244, 67, 54, 0.3); }
+        .recording { background: rgba(255, 193, 7, 0.3); animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+        
+        button {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.3);
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover { 
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+        button:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .mode-selector {
+            margin: 20px 0;
+        }
+        .mode-selector button {
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+        .mode-selector button.active {
+            background: rgba(76, 175, 80, 0.4);
+            border-color: rgba(76, 175, 80, 0.6);
+        }
+        
+        .log {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            border-radius: 8px;
+            margin-top: 20px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOM v3.0 - Einfach Sprechen</h1>
+        
+        <div id="status" class="status disconnected">
+            🔴 Nicht verbunden - Klicke "Start"
+        </div>
+        
+        <div class="mode-selector">
+            <button id="modularBtn" onclick="setMode('modular')" class="active">
+                🔄 Modular (STT→LLM→TTS)
+            </button>
+            <button id="directBtn" onclick="setMode('direct')">
+                ⚡ Direct (Speech-to-Speech)
+            </button>
+        </div>
+        
+        <div>
+            <button id="startBtn" onclick="start()">🚀 Start</button>
+            <button id="stopBtn" onclick="stopMicrophone()" disabled>⏹️ Mikrofon Stop</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>🔌 Trennen</button>
+        </div>
+        
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let currentMode = 'modular';
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(status, text) {
+            const statusDiv = document.getElementById('status');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = text;
+            
+            if (status === 'connected') {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            } else if (status === 'recording') {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('modularBtn').classList.toggle('active', mode === 'modular');
+            document.getElementById('directBtn').classList.toggle('active', mode === 'direct');
+            log(`🔄 Modus gewechselt zu: ${mode}`);
+        }
+
+        async function start() {
+            try {
+                // 1. WebSocket verbinden
+                ws = new WebSocket('ws://localhost:8080');
+                
+                ws.onopen = function() {
+                    log('✅ WebSocket verbunden');
+                    isConnected = true;
+                    updateStatus('connected', '🟢 Verbunden - Starte Mikrofon...');
+                    
+                    // Modus setzen
+                    ws.send(JSON.stringify({
+                        type: 'switch_mode',
+                        mode: currentMode
+                    }));
+                    
+                    // 2. Mikrofon starten
+                    startMicrophone();
+                };
+                
+                ws.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                };
+                
+                ws.onclose = function() {
+                    log('❌ WebSocket getrennt');
+                    isConnected = false;
+                    updateStatus('disconnected', '🔴 Nicht verbunden');
+                };
+                
+                ws.onerror = function(error) {
+                    log(`❌ WebSocket Fehler: ${error}`);
+                };
+                
+            } catch (error) {
+                log(`❌ Fehler: ${error}`);
+            }
+        }
+
+        async function startMicrophone() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new AudioContext();
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                // Audio-Chunks senden
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                processor.onaudioprocess = function(e) {
+                    if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
+                        const audioData = e.inputBuffer.getChannelData(0);
+                        const pcm16 = new Int16Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            pcm16[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                        }
+                        
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio: Array.from(pcm16),
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                };
+                
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                updateStatus('recording', '🎤 Spreche jetzt...');
+                log('🎤 Mikrofon aktiv - Sprich jetzt!');
+                
+            } catch (error) {
+                log(`❌ Mikrofon-Fehler: ${error}`);
+                updateStatus('disconnected', '🔴 Mikrofon-Fehler');
+            }
+        }
+
+        function handleMessage(data) {
+            log(`📨 ${data.type}: ${data.text || data.audio ? 'Audio empfangen' : 'Event'}`);
+            
+            if (data.type === 'tts_audio' || data.type === 'direct_response') {
+                // Audio abspielen (vereinfacht)
+                log('🔊 Audio wird abgespielt...');
+            }
+        }
+
+        function stopMicrophone() {
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            isRecording = false;
+            updateStatus('connected', '🟢 Verbunden - Mikrofon gestoppt');
+            log('⏹️ Mikrofon gestoppt - WebSocket bleibt verbunden');
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            isConnected = false;
+            isRecording = false;
+            updateStatus('disconnected', '🔴 Getrennt');
+            log('🔌 Komplett getrennt');
+        }
+
+        // Auto-start beim Laden
+        window.onload = function() {
+            log('🚀 TOM v3.0 geladen');
+            log('💡 Klicke "Start" und sprich dann einfach!');
+        };
+    </script>
+</body>
+</html>

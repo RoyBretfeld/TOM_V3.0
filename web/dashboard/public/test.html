@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOM v3.0 - Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOM v3.0 - Realtime Test</h1>
+        
+        <div id="status" class="status disconnected">
+            🔴 Nicht verbunden
+        </div>
+        
+        <div>
+            <button id="connectBtn" onclick="connect()">Verbinden</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Trennen</button>
+            <button id="testBtn" onclick="sendTest()" disabled>Test senden</button>
+            <button id="micBtn" onclick="startMicrophone()" disabled>🎤 Mikrofon starten</button>
+        </div>
+        
+        <h3>Pipeline-Modus:</h3>
+        <div>
+            <button id="modularBtn" onclick="switchMode('modular')" disabled>🔄 Modular (STT→LLM→TTS)</button>
+            <button id="directBtn" onclick="switchMode('direct')" disabled>⚡ Direct (Speech-to-Speech)</button>
+        </div>
+        
+        <h3>Event Log:</h3>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            isConnected = connected;
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const testBtn = document.getElementById('testBtn');
+            const modularBtn = document.getElementById('modularBtn');
+            const directBtn = document.getElementById('directBtn');
+
+            if (connected) {
+                statusDiv.textContent = '🟢 Verbunden';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                testBtn.disabled = false;
+                modularBtn.disabled = false;
+                directBtn.disabled = false;
+            } else {
+                statusDiv.textContent = '🔴 Nicht verbunden';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                testBtn.disabled = true;
+                modularBtn.disabled = true;
+                directBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            try {
+                ws = new WebSocket('ws://localhost:8080');
+                
+                ws.onopen = function() {
+                    log('✅ WebSocket verbunden');
+                    updateStatus(true);
+                };
+                
+                ws.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    log(`📨 ${data.type}: ${JSON.stringify(data)}`);
+                };
+                
+                ws.onclose = function() {
+                    log('❌ WebSocket getrennt');
+                    updateStatus(false);
+                };
+                
+                ws.onerror = function(error) {
+                    log(`❌ WebSocket Fehler: ${error}`);
+                };
+                
+            } catch (error) {
+                log(`❌ Verbindungsfehler: ${error}`);
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendTest() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const testMessage = {
+                    type: 'audio_chunk',
+                    audio: 'test_audio_data',
+                    timestamp: new Date().toISOString()
+                };
+                ws.send(JSON.stringify(testMessage));
+                log('📤 Test-Nachricht gesendet');
+            }
+        }
+
+        function switchMode(mode) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'switch_mode',
+                    mode: mode,
+                    timestamp: new Date().toISOString()
+                };
+                ws.send(JSON.stringify(message));
+                log(`🔄 Modus gewechselt zu: ${mode}`);
+            }
+        }
+
+        async function startMicrophone() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log('🎤 Mikrofon aktiviert - Sprich jetzt!');
+                
+                // Audio-Chunks senden
+                const audioContext = new AudioContext();
+                const source = audioContext.createMediaStreamSource(stream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                processor.onaudioprocess = function(e) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const audioData = e.inputBuffer.getChannelData(0);
+                        const pcm16 = new Int16Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            pcm16[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                        }
+                        
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio: Array.from(pcm16),
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                };
+                
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                document.getElementById('micBtn').textContent = '🎤 Mikrofon läuft...';
+                document.getElementById('micBtn').disabled = true;
+                
+            } catch (error) {
+                log(`❌ Mikrofon-Fehler: ${error}`);
+            }
+        }
+
+        // Auto-connect beim Laden
+        window.onload = function() {
+            log('🚀 TOM v3.0 Test-Seite geladen');
+            log('💡 Klicke "Verbinden" um zu starten');
+        };
+    </script>
+</body>
+</html>

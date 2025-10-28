@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOM v3.0 - Realtime Pipeline (Echt)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .status-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px 15px;
+            border-radius: 10px;
+            font-weight: bold;
+            min-width: 120px;
+            text-align: center;
+        }
+        
+        .status-item.connected { background: rgba(76, 175, 80, 0.3); }
+        .status-item.listening { background: rgba(33, 150, 243, 0.3); }
+        .status-item.thinking { background: rgba(255, 193, 7, 0.3); }
+        .status-item.speaking { background: rgba(156, 39, 176, 0.3); }
+        .status-item.error { background: rgba(244, 67, 54, 0.3); }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .control-group {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+        }
+        
+        .control-group h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #ffd700;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 5px 0;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        button.primary {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+        }
+        
+        button.danger {
+            background: linear-gradient(45deg, #ff4757, #c44569);
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            margin: 5px 0;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        .audio-visualizer {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .visualizer-bar {
+            display: inline-block;
+            width: 4px;
+            background: #4ecdc4;
+            margin: 0 1px;
+            border-radius: 2px;
+            transition: height 0.1s ease;
+        }
+        
+        .log {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        
+        .log-info { background: rgba(33, 150, 243, 0.2); }
+        .log-success { background: rgba(76, 175, 80, 0.2); }
+        .log-warning { background: rgba(255, 193, 7, 0.2); }
+        .log-error { background: rgba(244, 67, 54, 0.2); }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .metric {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        .metric-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        
+        @media (max-width: 768px) {
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .status {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOM v3.0 - Realtime Pipeline (Echt)</h1>
+        
+        <div class="status">
+            <div class="status-item" id="connection-status">🔌 Nicht verbunden</div>
+            <div class="status-item" id="fsm-status">📊 LISTENING</div>
+            <div class="status-item" id="audio-status">🎵 Mikrofon aus</div>
+            <div class="status-item" id="provider-status">🌐 Provider unbekannt</div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <h3>🔐 Authentifizierung</h3>
+                <input type="text" id="call-id" placeholder="Call-ID" value="test-call-001">
+                <input type="password" id="jwt-token" placeholder="JWT-Token" value="dev-token">
+            </div>
+            
+            <div class="control-group">
+                <h3>🎤 Audio-Eingabe</h3>
+                <select id="audio-device">
+                    <option value="">Mikrofon auswählen...</option>
+                </select>
+                <button id="start-audio" class="primary">🎤 Mikrofon Start</button>
+                <button id="stop-audio" disabled>⏹️ Mikrofon Stop</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>🌐 Verbindung</h3>
+                <button id="connect" class="primary">🔌 Verbinden</button>
+                <button id="disconnect" disabled>❌ Trennen</button>
+                <button id="barge-in" disabled>⚡ Barge-In</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>📊 Pipeline</h3>
+                <button id="ping" disabled>📡 Ping</button>
+                <button id="stop" disabled>🛑 Stop</button>
+            </div>
+        </div>
+        
+        <div class="audio-visualizer">
+            <h3>🎵 Audio-Pegel</h3>
+            <div id="visualizer"></div>
+            <div id="audio-level">0%</div>
+        </div>
+        
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-value" id="stt-latency">-</div>
+                <div class="metric-label">STT Latenz</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="llm-latency">-</div>
+                <div class="metric-label">LLM Latenz</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="tts-latency">-</div>
+                <div class="metric-label">TTS Latenz</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="e2e-latency">-</div>
+                <div class="metric-label">E2E Latenz</div>
+            </div>
+        </div>
+        
+        <div class="log" id="log">
+            <div class="log-entry log-info">🚀 TOM v3.0 Realtime Pipeline geladen</div>
+            <div class="log-entry log-info">💡 Klicke "Verbinden" → "Mikrofon Start" → Sprechen!</div>
+        </div>
+    </div>
+
+    <script>
+        class RealtimePipeline {
+            constructor() {
+                this.ws = null;
+                this.audioContext = null;
+                this.mediaStream = null;
+                this.audioWorklet = null;
+                this.isConnected = false;
+                this.isAudioActive = false;
+                this.callId = '';
+                this.sessionId = '';
+                
+                // Metriken
+                this.metrics = {
+                    sttStart: 0,
+                    sttEnd: 0,
+                    llmStart: 0,
+                    llmEnd: 0,
+                    ttsStart: 0,
+                    ttsEnd: 0
+                };
+                
+                this.init();
+            }
+            
+            init() {
+                this.setupEventListeners();
+                this.enumerateAudioDevices();
+                this.log('🚀 Realtime Pipeline initialisiert', 'info');
+            }
+            
+            setupEventListeners() {
+                document.getElementById('connect').addEventListener('click', () => this.connect());
+                document.getElementById('disconnect').addEventListener('click', () => this.disconnect());
+                document.getElementById('start-audio').addEventListener('click', () => this.startAudio());
+                document.getElementById('stop-audio').addEventListener('click', () => this.stopAudio());
+                document.getElementById('barge-in').addEventListener('click', () => this.bargeIn());
+                document.getElementById('ping').addEventListener('click', () => this.ping());
+                document.getElementById('stop').addEventListener('click', () => this.stop());
+            }
+            
+            async enumerateAudioDevices() {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                    
+                    const select = document.getElementById('audio-device');
+                    select.innerHTML = '<option value="">Mikrofon auswählen...</option>';
+                    
+                    audioInputs.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device.deviceId;
+                        option.textContent = device.label || `Mikrofon ${device.deviceId.slice(0, 8)}`;
+                        select.appendChild(option);
+                    });
+                    
+                    this.log(`🎤 ${audioInputs.length} Audio-Geräte gefunden`, 'success');
+                } catch (error) {
+                    this.log(`❌ Fehler beim Auflisten der Geräte: ${error.message}`, 'error');
+                }
+            }
+            
+            async connect() {
+                try {
+                    this.callId = document.getElementById('call-id').value || 'test-call-' + Date.now();
+                    const jwtToken = document.getElementById('jwt-token').value;
+                    
+                    if (!jwtToken) {
+                        this.log('❌ JWT-Token erforderlich', 'error');
+                        return;
+                    }
+                    
+                    const wsUrl = `ws://localhost:8081/ws/stream/${this.callId}`;
+                    this.log(`🔌 Verbinde mit ${wsUrl}`, 'info');
+                    
+                    this.ws = new WebSocket(wsUrl, ['realtime-v1']);
+                    
+                    this.ws.onopen = () => {
+                        this.isConnected = true;
+                        this.updateStatus('connection-status', '🔌 Verbunden', 'connected');
+                        this.updateButtons();
+                        
+                        // JWT senden
+                        this.ws.send(JSON.stringify({
+                            jwt: jwtToken
+                        }));
+                        
+                        this.log('✅ WebSocket verbunden', 'success');
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        this.handleMessage(JSON.parse(event.data));
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.isConnected = false;
+                        this.updateStatus('connection-status', '🔌 Getrennt', '');
+                        this.updateButtons();
+                        this.log('❌ WebSocket getrennt', 'warning');
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log(`❌ WebSocket Fehler: ${error}`, 'error');
+                    };
+                    
+                } catch (error) {
+                    this.log(`❌ Verbindungsfehler: ${error.message}`, 'error');
+                }
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                
+                if (this.mediaStream) {
+                    this.stopAudio();
+                }
+                
+                this.isConnected = false;
+                this.updateStatus('connection-status', '🔌 Getrennt', '');
+                this.updateButtons();
+                this.log('🔌 Verbindung getrennt', 'info');
+            }
+            
+            async startAudio() {
+                try {
+                    const deviceId = document.getElementById('audio-device').value;
+                    const constraints = {
+                        audio: deviceId ? { deviceId: { exact: deviceId } } : true
+                    };
+                    
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    
+                    // AudioContext erstellen
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+                    
+                    // AudioWorklet für Downsampling
+                    await this.setupAudioWorklet();
+                    
+                    // Mikrofon-Input
+                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    source.connect(this.audioWorklet);
+                    
+                    this.isAudioActive = true;
+                    this.updateStatus('audio-status', '🎵 Mikrofon aktiv', 'listening');
+                    this.updateButtons();
+                    
+                    this.log('🎤 Mikrofon gestartet', 'success');
+                    
+                } catch (error) {
+                    this.log(`❌ Mikrofon-Fehler: ${error.message}`, 'error');
+                }
+            }
+            
+            async setupAudioWorklet() {
+                // AudioWorklet für 16kHz Downsampling
+                const workletCode = `
+                    class AudioProcessor extends AudioWorkletProcessor {
+                        constructor() {
+                            super();
+                            this.bufferSize = 320; // 20ms bei 16kHz
+                            this.buffer = new Float32Array(this.bufferSize);
+                            this.bufferIndex = 0;
+                        }
+                        
+                        process(inputs, outputs, parameters) {
+                            const input = inputs[0];
+                            if (input.length > 0) {
+                                const inputChannel = input[0];
+                                
+                                for (let i = 0; i < inputChannel.length; i++) {
+                                    this.buffer[this.bufferIndex] = inputChannel[i];
+                                    this.bufferIndex++;
+                                    
+                                    if (this.bufferIndex >= this.bufferSize) {
+                                        // Buffer voll - PCM16 konvertieren und senden
+                                        const pcm16 = new Int16Array(this.bufferSize);
+                                        for (let j = 0; j < this.bufferSize; j++) {
+                                            pcm16[j] = Math.max(-32768, Math.min(32767, this.buffer[j] * 32767));
+                                        }
+                                        
+                                        this.port.postMessage({
+                                            type: 'audioFrame',
+                                            audio: Array.from(pcm16),
+                                            timestamp: currentTime
+                                        });
+                                        
+                                        this.bufferIndex = 0;
+                                    }
+                                }
+                            }
+                            
+                            return true;
+                        }
+                    }
+                    
+                    registerProcessor('audio-processor', AudioProcessor);
+                `;
+                
+                const blob = new Blob([workletCode], { type: 'application/javascript' });
+                const workletUrl = URL.createObjectURL(blob);
+                
+                await this.audioContext.audioWorklet.addModule(workletUrl);
+                this.audioWorklet = new AudioWorkletNode(this.audioContext, 'audio-processor');
+                
+                this.audioWorklet.port.onmessage = (event) => {
+                    if (event.data.type === 'audioFrame' && this.isConnected) {
+                        this.sendAudioFrame(event.data.audio, event.data.timestamp);
+                    }
+                };
+                
+                URL.revokeObjectURL(workletUrl);
+            }
+            
+            sendAudioFrame(audioData, timestamp) {
+                if (!this.isConnected || !this.ws) return;
+                
+                const message = {
+                    type: 'audio_chunk',
+                    audio: btoa(String.fromCharCode(...audioData)),
+                    timestamp: timestamp,
+                    audio_length: audioData.length
+                };
+                
+                this.ws.send(JSON.stringify(message));
+            }
+            
+            stopAudio() {
+                if (this.mediaStream) {
+                    this.mediaStream.getTracks().forEach(track => track.stop());
+                    this.mediaStream = null;
+                }
+                
+                if (this.audioContext) {
+                    this.audioContext.close();
+                    this.audioContext = null;
+                }
+                
+                this.audioWorklet = null;
+                this.isAudioActive = false;
+                this.updateStatus('audio-status', '🎵 Mikrofon aus', '');
+                this.updateButtons();
+                
+                this.log('⏹️ Mikrofon gestoppt', 'info');
+            }
+            
+            bargeIn() {
+                if (!this.isConnected) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'barge_in',
+                    timestamp: Date.now() / 1000
+                }));
+                
+                this.log('⚡ Barge-In gesendet', 'warning');
+            }
+            
+            ping() {
+                if (!this.isConnected) return;
+                
+                const timestamp = Date.now() / 1000;
+                this.ws.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: timestamp
+                }));
+                
+                this.log('📡 Ping gesendet', 'info');
+            }
+            
+            stop() {
+                if (!this.isConnected) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'stop',
+                    timestamp: Date.now() / 1000
+                }));
+                
+                this.log('🛑 Stop gesendet', 'warning');
+            }
+            
+            handleMessage(data) {
+                const timestamp = new Date().toLocaleTimeString();
+                
+                switch (data.type) {
+                    case 'connected':
+                        this.sessionId = data.call_id;
+                        this.updateStatus('provider-status', '🌐 Provider verbunden', 'connected');
+                        this.log(`✅ Verbunden: ${data.call_id}`, 'success');
+                        break;
+                        
+                    case 'stt_final':
+                        this.metrics.sttEnd = Date.now();
+                        this.updateMetric('stt-latency', this.metrics.sttEnd - this.metrics.sttStart);
+                        this.log(`🎤 STT: "${data.text}"`, 'info');
+                        break;
+                        
+                    case 'llm_token':
+                        if (!this.metrics.llmStart) {
+                            this.metrics.llmStart = Date.now();
+                            this.updateStatus('fsm-status', '🤔 THINKING', 'thinking');
+                        }
+                        this.log(`🤖 LLM: ${data.text}`, 'info');
+                        break;
+                        
+                    case 'llm_complete':
+                        this.metrics.llmEnd = Date.now();
+                        this.updateMetric('llm-latency', this.metrics.llmEnd - this.metrics.llmStart);
+                        this.updateStatus('fsm-status', '🗣️ SPEAKING', 'speaking');
+                        this.log('✅ LLM Complete', 'success');
+                        break;
+                        
+                    case 'tts_audio':
+                        if (!this.metrics.ttsStart) {
+                            this.metrics.ttsStart = Date.now();
+                            this.updateMetric('tts-latency', this.metrics.ttsStart - this.metrics.llmEnd);
+                        }
+                        this.playAudioFrame(data.audio);
+                        break;
+                        
+                    case 'tts_complete':
+                        this.metrics.ttsEnd = Date.now();
+                        this.updateMetric('e2e-latency', this.metrics.ttsEnd - this.metrics.sttStart);
+                        this.updateStatus('fsm-status', '👂 LISTENING', 'listening');
+                        this.log('✅ TTS Complete', 'success');
+                        break;
+                        
+                    case 'barge_in_ack':
+                        this.log('⚡ Barge-In bestätigt', 'warning');
+                        break;
+                        
+                    case 'pong':
+                        const latency = data.latency_ms;
+                        this.log(`📡 Pong: ${latency.toFixed(1)}ms`, 'info');
+                        break;
+                        
+                    case 'provider_error':
+                        this.log(`❌ Provider Fehler: ${data.error}`, 'error');
+                        this.updateStatus('provider-status', '🌐 Provider Fehler', 'error');
+                        break;
+                        
+                    case 'rate_limit_exceeded':
+                        this.log('⚠️ Rate Limit überschritten', 'warning');
+                        break;
+                        
+                    default:
+                        this.log(`📨 ${data.type}: ${JSON.stringify(data)}`, 'info');
+                }
+            }
+            
+            playAudioFrame(audioData) {
+                // Audio-Frame abspielen (vereinfacht)
+                try {
+                    const audioBytes = atob(audioData);
+                    const audioArray = new Uint8Array(audioBytes.length);
+                    for (let i = 0; i < audioBytes.length; i++) {
+                        audioArray[i] = audioBytes.charCodeAt(i);
+                    }
+                    
+                    // Hier würde echte Audio-Wiedergabe implementiert
+                    this.log('🔊 Audio-Frame empfangen', 'info');
+                } catch (error) {
+                    this.log(`❌ Audio-Wiedergabe Fehler: ${error.message}`, 'error');
+                }
+            }
+            
+            updateStatus(elementId, text, className) {
+                const element = document.getElementById(elementId);
+                element.textContent = text;
+                element.className = `status-item ${className}`;
+            }
+            
+            updateButtons() {
+                document.getElementById('connect').disabled = this.isConnected;
+                document.getElementById('disconnect').disabled = !this.isConnected;
+                document.getElementById('start-audio').disabled = !this.isConnected || this.isAudioActive;
+                document.getElementById('stop-audio').disabled = !this.isAudioActive;
+                document.getElementById('barge-in').disabled = !this.isConnected;
+                document.getElementById('ping').disabled = !this.isConnected;
+                document.getElementById('stop').disabled = !this.isConnected;
+            }
+            
+            updateMetric(elementId, value) {
+                const element = document.getElementById(elementId);
+                if (value > 0) {
+                    element.textContent = `${value.toFixed(0)}ms`;
+                }
+            }
+            
+            log(message, type = 'info') {
+                const log = document.getElementById('log');
+                const entry = document.createElement('div');
+                entry.className = `log-entry log-${type}`;
+                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                log.appendChild(entry);
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+        
+        // Pipeline starten
+        const pipeline = new RealtimePipeline();
+    </script>
+</body>
+</html>

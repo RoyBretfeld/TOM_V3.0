@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOM v3.0 - Einfacher Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .status.connected { background: rgba(76, 175, 80, 0.3); }
+        .status.disconnected { background: rgba(244, 67, 54, 0.3); }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        button.primary {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+        }
+        
+        .log {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        
+        .log-info { background: rgba(33, 150, 243, 0.2); }
+        .log-success { background: rgba(76, 175, 80, 0.2); }
+        .log-warning { background: rgba(255, 193, 7, 0.2); }
+        .log-error { background: rgba(244, 67, 54, 0.2); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOM v3.0 - Einfacher Test</h1>
+        
+        <div class="status disconnected" id="status">
+            🔌 Nicht verbunden
+        </div>
+        
+        <div class="controls">
+            <button id="connect" class="primary">🔌 Verbinden</button>
+            <button id="disconnect" disabled>❌ Trennen</button>
+            <button id="test-audio" disabled>🎤 Test Audio</button>
+            <button id="ping" disabled>📡 Ping</button>
+            <button id="barge-in" disabled>⚡ Barge-In</button>
+        </div>
+        
+        <div class="log" id="log">
+            <div class="log-entry log-info">🚀 Einfacher Test geladen</div>
+            <div class="log-entry log-info">💡 Klicke "Verbinden" um zu starten!</div>
+        </div>
+    </div>
+
+    <script>
+        class SimpleTest {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.init();
+            }
+            
+            init() {
+                this.setupEventListeners();
+                this.log('🚀 Einfacher Test initialisiert', 'info');
+            }
+            
+            setupEventListeners() {
+                document.getElementById('connect').addEventListener('click', () => this.connect());
+                document.getElementById('disconnect').addEventListener('click', () => this.disconnect());
+                document.getElementById('test-audio').addEventListener('click', () => this.testAudio());
+                document.getElementById('ping').addEventListener('click', () => this.ping());
+                document.getElementById('barge-in').addEventListener('click', () => this.bargeIn());
+            }
+            
+            connect() {
+                try {
+                    this.log('🔌 Verbinde mit Server...', 'info');
+                    
+                    this.ws = new WebSocket('ws://localhost:8081/');
+                    
+                    this.ws.onopen = () => {
+                        this.isConnected = true;
+                        this.updateStatus('🔌 Verbunden', 'connected');
+                        this.updateButtons();
+                        this.log('✅ WebSocket verbunden', 'success');
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        this.handleMessage(JSON.parse(event.data));
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.isConnected = false;
+                        this.updateStatus('🔌 Getrennt', 'disconnected');
+                        this.updateButtons();
+                        this.log('❌ WebSocket getrennt', 'warning');
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log(`❌ WebSocket Fehler: ${error}`, 'error');
+                    };
+                    
+                } catch (error) {
+                    this.log(`❌ Verbindungsfehler: ${error.message}`, 'error');
+                }
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                
+                this.isConnected = false;
+                this.updateStatus('🔌 Getrennt', 'disconnected');
+                this.updateButtons();
+                this.log('🔌 Verbindung getrennt', 'info');
+            }
+            
+            testAudio() {
+                if (!this.isConnected) return;
+                
+                this.log('🎤 Sende Test-Audio...', 'info');
+                
+                // Simuliere Audio-Chunk
+                const testAudio = new Array(320).fill(0).map(() => Math.floor(Math.random() * 1000));
+                
+                this.ws.send(JSON.stringify({
+                    type: 'audio_chunk',
+                    audio: btoa(String.fromCharCode(...testAudio)),
+                    timestamp: Date.now() / 1000,
+                    audio_length: testAudio.length
+                }));
+            }
+            
+            ping() {
+                if (!this.isConnected) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: Date.now() / 1000
+                }));
+                
+                this.log('📡 Ping gesendet', 'info');
+            }
+            
+            bargeIn() {
+                if (!this.isConnected) return;
+                
+                this.ws.send(JSON.stringify({
+                    type: 'barge_in',
+                    timestamp: Date.now() / 1000
+                }));
+                
+                this.log('⚡ Barge-In gesendet', 'warning');
+            }
+            
+            handleMessage(data) {
+                const timestamp = new Date().toLocaleTimeString();
+                
+                switch (data.type) {
+                    case 'connected':
+                        this.log(`✅ Verbunden: ${data.message}`, 'success');
+                        break;
+                        
+                    case 'stt_final':
+                        this.log(`🎤 STT: "${data.text}"`, 'info');
+                        break;
+                        
+                    case 'llm_complete':
+                        this.log(`🤖 LLM: ${data.text}`, 'info');
+                        break;
+                        
+                    case 'tts_complete':
+                        this.log(`🔊 TTS: ${data.message}`, 'info');
+                        break;
+                        
+                    case 'pong':
+                        this.log(`📡 Pong empfangen (Latenz: ${data.latency_ms}ms)`, 'success');
+                        break;
+                        
+                    case 'barge_in_ack':
+                        this.log('⚡ Barge-In bestätigt', 'warning');
+                        break;
+                        
+                    default:
+                        this.log(`📨 ${data.type}: ${JSON.stringify(data)}`, 'info');
+                }
+            }
+            
+            updateStatus(text, className) {
+                const status = document.getElementById('status');
+                status.textContent = text;
+                status.className = `status ${className}`;
+            }
+            
+            updateButtons() {
+                document.getElementById('connect').disabled = this.isConnected;
+                document.getElementById('disconnect').disabled = !this.isConnected;
+                document.getElementById('test-audio').disabled = !this.isConnected;
+                document.getElementById('ping').disabled = !this.isConnected;
+                document.getElementById('barge-in').disabled = !this.isConnected;
+            }
+            
+            log(message, type = 'info') {
+                const log = document.getElementById('log');
+                const entry = document.createElement('div');
+                entry.className = `log-entry log-${type}`;
+                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                log.appendChild(entry);
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+        
+        // Test starten
+        const test = new SimpleTest();
+    </script>
+</body>
+</html>
